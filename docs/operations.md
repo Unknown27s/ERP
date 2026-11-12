@@ -1,19 +1,44 @@
-# Operations runbook (pilot)
+# Operations runbook — Phase 1
 
 ## Daily
-- Verify `/api/public/rates` freshness (< 120 min). If stale: Admin → Gold Rates → Refresh; on provider outage the last valid rate stays with a stale badge and billing warns.
-- Check Overview: today's bills, revenue, low-stock widget.
+- Check **Overview**: headcount, present today, pending leave, payroll for the
+  month, customers and revenue (each card only appears if your role may see it).
+- Review **Audit trail** for unexpected user, role or settings changes.
+- Confirm the API health check: `GET /api/health` → `{ "ok": true, "db": "postgres" }`.
 
-## Billing
-- Barcode box focused → scan → Enter. Unknown/sold codes block with a clear message.
-- Split tender: payments array must equal total within ₹1 or finalize fails (409).
-- Corrections: never edit a finalized bill — use Void (manager) which restores stock + writes return records.
+## Access management
+- Create a login in **Staff Management → Users**. Choose the least-privileged
+  role that fits; permissions are enforced by the API, not just hidden in menus.
+- Deactivate people who leave. Deactivation revokes existing sessions on their
+  next request; records and audit history stay intact.
+- Password resets return a one-time temporary password. Share it over a trusted
+  channel; it cannot be retrieved again.
+- Change a role's permissions in **Staff Management → Roles & permissions**.
+  Changes apply on the very next API request.
+
+## Payroll and leave
+- Preview a draft payroll run, review skipped employees (usually a missing
+  salary structure), then lock it. Locked runs are immutable; correct mistakes
+  with an adjustment run.
+- Marking a run **paid** records one salary expense for reports and the
+  dashboard. Posting to a finance ledger arrives with the Finance module
+  (Phase 3). Never pay twice.
+- Approving leave marks the covered days as `leave` in attendance without
+  overwriting a manually recorded day.
 
 ## Backups
-- SQLite pilot: copy `server/data/shop.db*` nightly off-machine. Postgres prod: `pg_dump` + tested restore drill before festive season.
-- RPO/RTO to agree with owner; exports are sensitive (restrict to owner/manager).
+- Postgres: schedule `pg_dump` (or Supabase's automated backups) and test a
+  restore before month-end. Keep exports off-machine; they contain salaries and
+  customer data.
+- Agree RPO/RTO with the owner. Take a manual dump before any migration or
+  manual data cleanup.
 
 ## Incidents
-- Rate provider down → stale badge, optional block via `BILLING_BLOCK_ON_STALE=true`.
-- Messaging provider down → recipients stay `queued/failed` with error text; bounded retry, no duplicates (idempotency key).
-- Rollback: `git tag` each release; frontend = static redeploy, backend = `npm start` previous tag + no destructive migrations without backup.
+- **API cannot boot:** check `DATABASE_URL`, `JWT_SECRET` and that migrations
+  `0001`–`0009` are present. `initDb` logs `[db] Supabase Postgres schema ready`.
+- **401 for a valid user:** the account may be deactivated, or `JWT_SECRET`
+  changed (which invalidates every token).
+- **403 on a screen:** confirm the role's permission in the matrix. The API
+  response names the required key (`"required": "staff.view"`).
+- **Rollback:** tag each release. The web app is a static redeploy; the API is
+  the previous build. Never run destructive migrations without a backup.

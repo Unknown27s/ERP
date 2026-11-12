@@ -14,17 +14,20 @@ const app = require('../src/index');
 
 before(async () => { await app.ready; });
 
-test('health + public catalogue hide costs', async () => {
+test('health + public branding, no legacy public catalogue', async () => {
   const srv = app.listen(0);
   const port = srv.address().port;
   try {
     const h = await fetch(`http://localhost:${port}/api/health`).then(r => r.json());
     assert.equal(h.ok, true);
-    const cat = await fetch(`http://localhost:${port}/api/public/products`).then(r => r.json());
-    assert.ok(Array.isArray(cat.data));
-    if (cat.data.length) {
-      assert.equal(cat.data[0].acquisition_cost_inr, undefined, 'costs must not leak to public');
-    }
+
+    const cfg = await fetch(`http://localhost:${port}/api/config`).then(r => r.json());
+    assert.equal(typeof cfg.data.product_name, 'string');
+    assert.ok(cfg.data.product_name.length > 0);
+
+    // The jewellery catalogue was intentionally removed in Phase 1.
+    const pub = await fetch(`http://localhost:${port}/api/public/products`);
+    assert.equal(pub.status, 404);
   } finally { srv.close(); }
 });
 

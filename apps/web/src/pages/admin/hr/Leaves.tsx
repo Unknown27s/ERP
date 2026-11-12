@@ -1,32 +1,105 @@
+/**
+ * ==============================================================================
+ * DESIGN SPECIFICATION: Leave Requests & Holiday Calendar (Leaves.tsx)
+ * ==============================================================================
+ * Functional Scope:
+ * 1. Leave Requests & Approval Workflow:
+ *    - Status tabs (Pending, Approved, Rejected, Cancelled).
+ *    - Approval/Rejection buttons with notes; approval auto-deducts balances.
+ * 2. Leave Policy & Annual Quotas:
+ *    - Configure leave types (Sick, Casual, Earned) with paid/unpaid toggle Switch.
+ * 3. Company Holiday Schedule:
+ *    - Track public, festival, and corporate holidays.
+ * ==============================================================================
+ */
+
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import { api } from '../../../lib/api';
-import Modal from '../../../components/Modal';
-import { ICONS } from '../../../components/icons';
+import {
+  CalendarRange,
+  Plus,
+  Check,
+  X,
+  Calendar,
+  AlertCircle,
+  CheckCircle2,
+  Trash2,
+  Clock,
+  Sparkles,
+} from 'lucide-react';
 import HrShell, { KPI_TINTS, useHrOverview } from './HrShell';
+import { Button } from '../../../components/ui/Button';
+import { Input } from '../../../components/ui/Input';
+import { Badge } from '../../../components/ui/Badge';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../../components/ui/Card';
+import { Switch } from '../../../components/ui/Switch';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../../components/ui/Dialog';
 
 type Employee = { id: string; emp_code: string; full_name: string; status: string };
 type LeaveType = { id: string; name: string; annual_quota: number; paid: number };
 type Leave = {
-  id: string; employee_id: string; from_date: string; to_date: string; days: number; reason: string | null;
-  status: string; leave_type: string; paid: number; full_name: string; emp_code: string; decision_note: string | null;
+  id: string;
+  employee_id: string;
+  from_date: string;
+  to_date: string;
+  days: number;
+  reason: string | null;
+  status: string;
+  leave_type: string;
+  paid: number;
+  full_name: string;
+  emp_code: string;
+  decision_note: string | null;
 };
-type Balance = { id: string; employee_id: string; full_name: string; emp_code: string; leave_type: string; year: number; entitled: number; used: number; balance: number };
+type Balance = {
+  id: string;
+  employee_id: string;
+  full_name: string;
+  emp_code: string;
+  leave_type: string;
+  year: number;
+  entitled: number;
+  used: number;
+  balance: number;
+};
 type Holiday = { id: string; holiday_date: string; name: string; holiday_type: string };
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearNow = () => new Date().getFullYear();
+
 const daysBetween = (a: string, b: string) => {
   const x = Date.parse(`${a}T00:00:00Z`);
   const y = Date.parse(`${b}T00:00:00Z`);
-  return Number.isFinite(x) && Number.isFinite(y) && y >= x ? Math.round((y - x) / 86400000) + 1 : 0;
+  return Number.isFinite(x) && Number.isFinite(y) && y >= x
+    ? Math.round((y - x) / 86400000) + 1
+    : 0;
 };
-const FILTERS = ['pending', 'approved', 'rejected', 'cancelled', 'all'];
+
+const STATUS_FILTERS = [
+  { key: 'pending', label: 'Pending Approval' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'all', label: 'All Requests' },
+];
 
 export default function HRLeaves() {
   const [status, setStatus] = useState('pending');
   const [year, setYear] = useState(String(yearNow()));
-  const [form, setForm] = useState({ employee_id: '', leave_type_id: '', from_date: today(), to_date: today(), reason: '' });
+  const [form, setForm] = useState({
+    employee_id: '',
+    leave_type_id: '',
+    from_date: today(),
+    to_date: today(),
+    reason: '',
+  });
   const [typeForm, setTypeForm] = useState({ name: '', annual_quota: '12', paid: true });
   const [holidayForm, setHolidayForm] = useState({ holiday_date: today(), name: '', holiday_type: 'public' });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -49,276 +122,522 @@ export default function HRLeaves() {
   const reqDays = daysBetween(form.from_date, form.to_date);
   const balanceLeft = balRows.reduce((s, b) => s + Number(b.balance || 0), 0);
 
-  const act = async (fn: () => Promise<unknown>, ok: string) => {
+  const refreshAll = () =>
+    Promise.all([leaves.refetch(), balances.refetch(), holidays.refetch(), types.refetch()]);
+
+  const apply = async (e: React.FormEvent) => {
+    e.preventDefault();
     setMsg(null);
     try {
-      await fn();
-      setMsg({ ok: true, text: ok });
-      await Promise.all([leaves.refetch(), balances.refetch(), holidays.refetch(), types.refetch()]);
-      return true;
-    } catch (e: any) {
-      setMsg({ ok: false, text: e.message || 'Something went wrong' });
-      return false;
+      await api.post('/hr/leaves', { ...form, days: reqDays });
+      setMsg({ ok: true, text: 'Leave request submitted successfully (pending review).' });
+      setForm({ ...form, reason: '' });
+      setShowApply(false);
+      refreshAll();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Submission failed.' });
     }
   };
 
-  const apply = async () => {
-    const done = await act(
-      () => api.post('/hr/leaves', { ...form, days: reqDays }),
-      'Leave request submitted (status: pending).',
-    );
-    if (done) { setForm({ ...form, reason: '' }); setShowApply(false); }
+  const decide = async (l: Leave, next: 'approved' | 'rejected') => {
+    const note = next === 'rejected' ? window.prompt('Reason for rejection (optional)') || '' : '';
+    setMsg(null);
+    try {
+      await api.post(`/hr/leaves/${l.id}/decide`, { status: next, note });
+      setMsg({ ok: true, text: `Leave request ${next}.` });
+      refreshAll();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Action failed.' });
+    }
   };
-  const decide = (l: Leave, next: 'approved' | 'rejected') => {
-    const note = next === 'rejected' ? (window.prompt('Reason for rejection (optional)') || '') : '';
-    act(() => api.post(`/hr/leaves/${l.id}/decide`, { status: next, note }), `Leave ${next}.`);
-  };
-  const cancel = (l: Leave) => act(() => api.post(`/hr/leaves/${l.id}/cancel`, {}), 'Leave request cancelled.');
-  const addType = async () => {
+
+  const addType = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!typeForm.name.trim()) return;
-    const done = await act(
-      () => api.post('/hr/leave-types', { name: typeForm.name.trim(), annual_quota: Number(typeForm.annual_quota) || 0, paid: typeForm.paid }),
-      'Leave type added.',
-    );
-    if (done) { setTypeForm({ name: '', annual_quota: '12', paid: true }); setShowType(false); }
+    try {
+      await api.post('/hr/leave-types', {
+        name: typeForm.name.trim(),
+        annual_quota: Number(typeForm.annual_quota) || 0,
+        paid: typeForm.paid ? 1 : 0,
+      });
+      setMsg({ ok: true, text: 'Leave policy type registered.' });
+      setTypeForm({ name: '', annual_quota: '12', paid: true });
+      setShowType(false);
+      types.refetch();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Could not add leave type.' });
+    }
   };
-  const addHoliday = async () => {
+
+  const addHoliday = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!holidayForm.name.trim()) return;
-    const done = await act(
-      () => api.post('/hr/holidays', holidayForm),
-      'Holiday added.',
-    );
-    if (done) { setHolidayForm({ ...holidayForm, name: '' }); setShowHoliday(false); }
+    try {
+      await api.post('/hr/holidays', holidayForm);
+      setMsg({ ok: true, text: 'Company holiday added to calendar.' });
+      setHolidayForm({ ...holidayForm, name: '' });
+      setShowHoliday(false);
+      holidays.refetch();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Could not add holiday.' });
+    }
   };
-  const removeHoliday = (h: Holiday) => window.confirm(`Delete holiday ${h.name}?`) &&
-    act(() => api.del(`/hr/holidays/${h.id}`), 'Holiday deleted.');
+
+  const removeHoliday = async (h: Holiday) => {
+    if (!window.confirm(`Delete holiday ${h.name}?`)) return;
+    try {
+      await api.del(`/hr/holidays/${h.id}`);
+      setMsg({ ok: true, text: 'Holiday removed.' });
+      holidays.refetch();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Could not delete holiday.' });
+    }
+  };
 
   return (
     <HrShell
-      title="Leave &amp; holidays"
-      subtitle="Apply and approve leave; approving a paid leave consumes the employee's balance and marks the days on the attendance register."
+      title="Leave &amp; Holidays"
+      subtitle="Manage employee time off approvals, annual leave balance quotas, and statutory holiday schedules."
       kpis={[
-        { label: 'Pending approvals', value: overview ? String(overview.pending_leaves) : '—', meta: 'awaiting decision', icon: ICONS.calendar, ...KPI_TINTS.amber },
-        { label: 'Balance days', value: String(balanceLeft), meta: `left in ${year}`, icon: ICONS.wallet, ...KPI_TINTS.green },
-        { label: 'Holidays', value: String(holidayRows.length), meta: `in ${year}`, icon: ICONS.gem, ...KPI_TINTS.rose },
-        { label: 'Leave types', value: String(leaveTypes.length), meta: 'configured policies', icon: ICONS.briefcase, ...KPI_TINTS.gold },
+        { label: 'Pending Approvals', value: overview ? String(overview.pending_leaves) : '—', meta: 'Awaiting review', ...KPI_TINTS.amber },
+        { label: 'Remaining Balance', value: String(balanceLeft), meta: `Days total in ${year}`, ...KPI_TINTS.green },
+        { label: 'Scheduled Holidays', value: String(holidayRows.length), meta: `Calendar year ${year}`, ...KPI_TINTS.rose },
+        { label: 'Leave Policies', value: String(leaveTypes.length), meta: 'Configured quota types', ...KPI_TINTS.gold },
       ]}
-      actions={<button className="btn gold" onClick={() => { setMsg(null); setShowApply(true); }}>+ Apply leave</button>}
+      actions={
+        <Button onClick={() => setShowApply(true)} className="gap-1.5 shadow-sm">
+          <Plus className="w-4 h-4" />
+          <span>Apply Leave</span>
+        </Button>
+      }
     >
-      {msg && <div className={`hr-msg${msg.ok ? '' : ' err'}`}>{msg.text}</div>}
-
-        <div className="hr-card">
-          <div className="hr-card-head">
-            <h2>Leave types</h2>
-            <span className="sub">{leaveTypes.length} configured</span>
-            <div className="hr-card-actions">
-              <button className="btn ghost sm" onClick={() => { setMsg(null); setShowType(true); }}>+ Add type</button>
-            </div>
-          </div>
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr><th>Type</th><th>Yearly quota</th><th>Paid</th></tr></thead>
-              <tbody>
-                {leaveTypes.map((t) => (
-                  <tr key={t.id}><td>{t.name}</td><td>{t.annual_quota}</td><td>{t.paid ? 'Yes' : 'No'}</td></tr>
-                ))}
-                {!leaveTypes.length && <tr><td colSpan={3}><div className="empty">Loading…</div></td></tr>}
-              </tbody>
-            </table>
-          </div>
+      {/* Alert Banner */}
+      {msg && (
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
+            msg.ok
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          <span>{msg.text}</span>
         </div>
+      )}
 
-      <div className="hr-card">
-        <div className="hr-card-head">
-          <h2>Leave requests</h2>
-          <span className="sub">{rows.length} shown</span>
-          <div className="hr-card-actions">
-            <div className="hr-segments" role="group" aria-label="Filter leave requests">
-              {FILTERS.map((s) => (
-                <button key={s} className={`hr-segment${status === s ? ' active' : ''}`} onClick={() => setStatus(s)}>{s}</button>
-              ))}
-            </div>
+      {/* ──────────────────────────────────────────────────────────────────
+          1. LEAVE REQUESTS APPROVAL SECTION
+          ────────────────────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <CardTitle className="text-sm font-bold text-slate-900">Leave Requests</CardTitle>
+            <CardDescription>Submitted applications requiring supervisor or manager review.</CardDescription>
           </div>
-        </div>
-        <div className="tbl-wrap">
-          <table className="tbl">
-            <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>
-              {rows.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.full_name}<br /><small style={{ color: 'var(--color-muted)' }}>{l.emp_code}</small></td>
-                  <td>{l.leave_type}{l.paid ? '' : <><br /><small style={{ color: 'var(--color-muted)' }}>unpaid</small></>}</td>
-                  <td>{l.from_date}{l.from_date !== l.to_date ? ` → ${l.to_date}` : ''}</td>
-                  <td>{l.days}</td>
-                  <td><small>{l.reason || '—'}{l.decision_note ? ` · ${l.decision_note}` : ''}</small></td>
-                  <td><span className={`badge ${l.status === 'approved' ? 'ok' : l.status === 'pending' ? 'warn' : 'err'}`}>{l.status}</span></td>
-                  <td>
-                    {l.status === 'pending' && (
-                      <div className="hr-row-actions">
-                        <button className="btn gold xs" onClick={() => decide(l, 'approved')}>Approve</button>
-                        <button className="btn ghost xs" onClick={() => decide(l, 'rejected')}>Reject</button>
-                        <button className="btn ghost xs" onClick={() => cancel(l)}>Cancel</button>
-                      </div>
-                    )}
-                  </td>
+
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setStatus(f.key)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                  status === f.key
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
+                <tr>
+                  <th className="py-3 px-4">Employee</th>
+                  <th className="py-3 px-4">Leave Policy</th>
+                  <th className="py-3 px-4">From</th>
+                  <th className="py-3 px-4">To</th>
+                  <th className="py-3 px-4">Days</th>
+                  <th className="py-3 px-4">Reason</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Decision</th>
                 </tr>
-              ))}
-              {!rows.length && <tr><td colSpan={7}><div className="empty">No {status === 'all' ? '' : status} leave requests.</div></td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="hr-grid-2">
-        <div className="hr-card">
-          <div className="hr-card-head">
-            <h2>Leave balances</h2>
-            <span className="sub">{balRows.length} entries</span>
-            <div className="hr-card-actions">
-              <input type="number" style={{ maxWidth: 110 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Balance year" />
-            </div>
-          </div>
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr><th>Employee</th><th>Leave type</th><th>Entitled</th><th>Used</th><th>Balance</th></tr></thead>
-              <tbody>
-                {balRows.map((b) => (
-                  <tr key={b.id}>
-                    <td>{b.full_name}<br /><small style={{ color: 'var(--color-muted)' }}>{b.emp_code}</small></td>
-                    <td>{b.leave_type}</td><td>{b.entitled}</td><td>{b.used}</td>
-                    <td><strong style={{ color: b.balance <= 0 ? 'var(--color-error)' : 'inherit' }}>{b.balance}</strong></td>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {leaves.isLoading && (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-400">
+                      Loading leave requests…
+                    </td>
+                  </tr>
+                )}
+                {!leaves.isLoading && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-400">
+                      No leave applications found for this filter.
+                    </td>
+                  </tr>
+                )}
+                {rows.map((l) => (
+                  <tr key={l.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-3 px-4 font-semibold text-slate-900">
+                      {l.full_name}
+                      <span className="font-mono text-[11px] text-slate-400 ml-1.5">({l.emp_code})</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="font-medium text-slate-800">{l.leave_type}</span>
+                      <span className="text-[10px] text-slate-400 block">{l.paid ? 'Paid' : 'Unpaid'}</span>
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-600">{l.from_date}</td>
+                    <td className="py-3 px-4 font-mono text-slate-600">{l.to_date}</td>
+                    <td className="py-3 px-4 font-bold text-slate-900">{l.days} {l.days === 1 ? 'day' : 'days'}</td>
+                    <td className="py-3 px-4 text-slate-500 max-w-xs truncate">{l.reason || '—'}</td>
+                    <td className="py-3 px-4">
+                      <Badge
+                        variant={
+                          l.status === 'approved'
+                            ? 'success'
+                            : l.status === 'pending'
+                            ? 'warning'
+                            : l.status === 'rejected'
+                            ? 'destructive'
+                            : 'secondary'
+                        }
+                      >
+                        {l.status}
+                      </Badge>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {l.status === 'pending' ? (
+                        <div className="inline-flex items-center gap-1.5">
+                          <Button
+                            size="sm"
+                            onClick={() => decide(l, 'approved')}
+                            className="h-7 px-2.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Approve</span>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => decide(l, 'rejected')}
+                            className="h-7 px-2.5 text-[11px] text-rose-600 hover:text-rose-700 hover:bg-rose-50 gap-1"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Reject</span>
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">Resolved</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {!balRows.length && <tr><td colSpan={5}><div className="empty">Balances appear once employees and leave types exist.</div></td></tr>}
               </tbody>
             </table>
           </div>
-        </div>
+        </CardContent>
+      </Card>
 
-        <div className="hr-card">
-          <div className="hr-card-head">
-            <h2>Holidays {year}</h2>
-            <span className="sub">{holidayRows.length} days</span>
-            <div className="hr-card-actions">
-              <input type="number" style={{ maxWidth: 110 }} value={year} onChange={(e) => setYear(e.target.value)} aria-label="Holiday year" />
-              <button className="btn ghost sm" onClick={() => { setMsg(null); setShowHoliday(true); }}>+ Add holiday</button>
+      {/* ──────────────────────────────────────────────────────────────────
+          2. LEAVE TYPES & HOLIDAY CALENDAR GRIDS
+          ────────────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Leave Policy Types */}
+        <Card>
+          <CardHeader className="pb-3 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-bold text-slate-900">Leave Quota Policies</CardTitle>
+              <CardDescription>Configured annual allowances and compensation terms.</CardDescription>
             </div>
-          </div>
-          <div className="tbl-wrap">
-            <table className="tbl">
-              <thead><tr><th>Date</th><th>Name</th><th>Type</th><th /></tr></thead>
-              <tbody>
+            <Button size="sm" variant="outline" onClick={() => setShowType(true)} className="h-7 px-2.5 text-xs gap-1">
+              <Plus className="w-3.5 h-3.5" />
+              <span>Policy</span>
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
+                <tr>
+                  <th className="py-2.5 px-4">Leave Name</th>
+                  <th className="py-2.5 px-4">Yearly Quota</th>
+                  <th className="py-2.5 px-4 text-right">Compensation</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {leaveTypes.map((t) => (
+                  <tr key={t.id} className="hover:bg-slate-50/70">
+                    <td className="py-2.5 px-4 font-semibold text-slate-800">{t.name}</td>
+                    <td className="py-2.5 px-4 font-bold text-slate-900">{t.annual_quota} days/yr</td>
+                    <td className="py-2.5 px-4 text-right">
+                      <Badge variant={t.paid ? 'success' : 'outline'} className="text-[10px]">
+                        {t.paid ? 'Paid' : 'Unpaid'}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        {/* Holiday Calendar */}
+        <Card>
+          <CardHeader className="pb-3 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-bold text-slate-900">Corporate &amp; Public Holidays</CardTitle>
+              <CardDescription>Mandatory days off scheduled for calendar year {year}.</CardDescription>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setShowHoliday(true)} className="h-7 px-2.5 text-xs gap-1">
+              <Plus className="w-3.5 h-3.5" />
+              <span>Holiday</span>
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
+                <tr>
+                  <th className="py-2.5 px-4">Date</th>
+                  <th className="py-2.5 px-4">Holiday Title</th>
+                  <th className="py-2.5 px-4">Category</th>
+                  <th className="py-2.5 px-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
                 {holidayRows.map((h) => (
-                  <tr key={h.id}>
-                    <td>{h.holiday_date}</td><td>{h.name}</td><td>{h.holiday_type}</td>
-                    <td><button className="btn ghost xs" onClick={() => removeHoliday(h)} title="Delete holiday">×</button></td>
+                  <tr key={h.id} className="hover:bg-slate-50/70">
+                    <td className="py-2.5 px-4 font-mono text-slate-600">{h.holiday_date}</td>
+                    <td className="py-2.5 px-4 font-semibold text-slate-800">{h.name}</td>
+                    <td className="py-2.5 px-4">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">
+                        {h.holiday_type}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => removeHoliday(h)}
+                        className="text-slate-400 hover:text-rose-600 p-1 rounded transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
-                {!holidayRows.length && <tr><td colSpan={4}><div className="empty">No holidays for {year}.</div></td></tr>}
               </tbody>
             </table>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Apply Leave Dialog */}
       {showApply && (
-        <Modal
-          title="Apply for leave"
-          subtitle="Creates a pending request that can be approved or rejected."
-          onClose={() => setShowApply(false)}
-          size="md"
-          footer={
-            <>
-              <span className="hr-stat" style={{ alignSelf: 'center' }}>Requested: {reqDays} day(s)</span>
-              <span className="grow" />
-              <button type="button" className="btn ghost" onClick={() => setShowApply(false)}>Cancel</button>
-              <button type="submit" form="leave-form" className="btn gold" disabled={!form.employee_id || !form.leave_type_id || !reqDays}>Submit request</button>
-            </>
-          }
-        >
-          {msg && !msg.ok && <div className="err-box" style={{ marginBottom: 12 }}>{msg.text}</div>}
-          <form id="leave-form" onSubmit={(e) => { e.preventDefault(); apply(); }}>
-            <div className="hr-form-grid">
-              <div className="hr-field span-2">
-                <label className="lbl" htmlFor="lv-employee">Employee</label>
-                <select id="lv-employee" value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })}>
-                  <option value="">Select employee</option>
-                  {staff.map((e) => <option key={e.id} value={e.id}>{e.emp_code} · {e.full_name}</option>)}
+        <Dialog open={true} onOpenChange={() => setShowApply(false)}>
+          <DialogContent size="md">
+            <DialogHeader>
+              <DialogTitle>Submit Leave Application</DialogTitle>
+              <DialogDescription>
+                Request time off. Approving a paid leave will consume your allocated policy balance.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={apply} className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Staff Member *</label>
+                <select
+                  value={form.employee_id}
+                  onChange={(e) => setForm({ ...form, employee_id: e.target.value })}
+                  required
+                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">Select Employee…</option>
+                  {staff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.emp_code} — {s.full_name}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="lv-type">Leave type</label>
-                <select id="lv-type" value={form.leave_type_id} onChange={(e) => setForm({ ...form, leave_type_id: e.target.value })}>
-                  <option value="">Select type</option>
-                  {leaveTypes.map((t) => <option key={t.id} value={t.id}>{t.name}{t.paid ? '' : ' (unpaid)'}</option>)}
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Leave Type *</label>
+                <select
+                  value={form.leave_type_id}
+                  onChange={(e) => setForm({ ...form, leave_type_id: e.target.value })}
+                  required
+                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">Select Leave Policy…</option>
+                  {leaveTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.annual_quota} days/yr, {t.paid ? 'Paid' : 'Unpaid'})
+                    </option>
+                  ))}
                 </select>
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="lv-from">From</label>
-                <input id="lv-from" type="date" value={form.from_date} onChange={(e) => setForm({ ...form, from_date: e.target.value })} />
+
+              <div className="grid grid-cols-2 gap-3.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">From Date *</label>
+                  <Input
+                    type="date"
+                    value={form.from_date}
+                    onChange={(e) => setForm({ ...form, from_date: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">To Date *</label>
+                  <Input
+                    type="date"
+                    value={form.to_date}
+                    onChange={(e) => setForm({ ...form, to_date: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="lv-to">To</label>
-                <input id="lv-to" type="date" value={form.to_date} onChange={(e) => setForm({ ...form, to_date: e.target.value })} />
+
+              <div className="p-2.5 rounded-lg bg-slate-50 text-xs text-slate-600 font-semibold">
+                Requested Duration: <span className="text-brand-600 font-bold">{reqDays}</span> day(s)
               </div>
-              <div className="hr-field span-all">
-                <label className="lbl" htmlFor="lv-reason">Reason</label>
-                <input id="lv-reason" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder="Optional" />
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Reason / Notes</label>
+                <Input
+                  value={form.reason}
+                  onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                  placeholder="Medical reason, family event, personal emergency…"
+                />
               </div>
-            </div>
-          </form>
-        </Modal>
+
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setShowApply(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!form.employee_id || !form.leave_type_id || reqDays <= 0}>
+                  Submit Application
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
 
+      {/* Add Leave Type Dialog with Radix Switch */}
       {showType && (
-        <Modal
-          title="Add leave type"
-          subtitle="Quota is the yearly entitlement per employee."
-          onClose={() => setShowType(false)}
-          size="sm"
-          footer={
-            <>
-              <span className="grow" />
-              <button type="button" className="btn ghost" onClick={() => setShowType(false)}>Cancel</button>
-              <button type="button" className="btn gold" onClick={addType} disabled={!typeForm.name.trim()}>Add type</button>
-            </>
-          }
-        >
-          {msg && !msg.ok && <div className="err-box" style={{ marginBottom: 12 }}>{msg.text}</div>}
-          <label className="lbl">Type name</label>
-          <input autoFocus value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} placeholder="e.g. Casual leave" />
-          <label className="lbl">Annual quota (days)</label>
-          <input type="number" min={0} value={typeForm.annual_quota} onChange={(e) => setTypeForm({ ...typeForm, annual_quota: e.target.value })} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 }}>
-            <input type="checkbox" style={{ width: 'auto' }} checked={typeForm.paid} onChange={(e) => setTypeForm({ ...typeForm, paid: e.target.checked })} />
-            <span>Paid leave</span>
-          </label>
-        </Modal>
+        <Dialog open={true} onOpenChange={() => setShowType(false)}>
+          <DialogContent size="sm">
+            <DialogHeader>
+              <DialogTitle>Configure Leave Policy</DialogTitle>
+              <DialogDescription>Define an annual leave quota and compensation type.</DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={addType} className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Policy Title</label>
+                <Input
+                  value={typeForm.name}
+                  onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })}
+                  required
+                  placeholder="e.g. Casual Leave (CL)"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Annual Quota (Days/Year)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={typeForm.annual_quota}
+                  onChange={(e) => setTypeForm({ ...typeForm, annual_quota: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg border border-slate-200">
+                <div>
+                  <div className="text-xs font-semibold text-slate-800">Paid Leave</div>
+                  <div className="text-[11px] text-slate-400">Salary continues during absence</div>
+                </div>
+                <Switch
+                  checked={typeForm.paid}
+                  onCheckedChange={(checked) => setTypeForm({ ...typeForm, paid: checked })}
+                />
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setShowType(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!typeForm.name.trim()}>
+                  Save Policy
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
 
+      {/* Add Holiday Dialog */}
       {showHoliday && (
-        <Modal
-          title="Add holiday"
-          subtitle="Holidays appear on the attendance register for the selected year."
-          onClose={() => setShowHoliday(false)}
-          size="sm"
-          footer={
-            <>
-              <span className="grow" />
-              <button type="button" className="btn ghost" onClick={() => setShowHoliday(false)}>Cancel</button>
-              <button type="button" className="btn gold" onClick={addHoliday} disabled={!holidayForm.name.trim()}>Add holiday</button>
-            </>
-          }
-        >
-          {msg && !msg.ok && <div className="err-box" style={{ marginBottom: 12 }}>{msg.text}</div>}
-          <label className="lbl">Date</label>
-          <input type="date" value={holidayForm.holiday_date} onChange={(e) => setHolidayForm({ ...holidayForm, holiday_date: e.target.value })} />
-          <label className="lbl">Holiday name</label>
-          <input autoFocus value={holidayForm.name} onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })} placeholder="e.g. Diwali" />
-          <label className="lbl">Type</label>
-          <select value={holidayForm.holiday_type} onChange={(e) => setHolidayForm({ ...holidayForm, holiday_type: e.target.value })}>
-            <option value="public">Public</option><option value="festival">Festival</option><option value="shop">Shop</option>
-          </select>
-        </Modal>
+        <Dialog open={true} onOpenChange={() => setShowHoliday(false)}>
+          <DialogContent size="sm">
+            <DialogHeader>
+              <DialogTitle>Schedule Company Holiday</DialogTitle>
+              <DialogDescription>Add a holiday date to the official company calendar.</DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={addHoliday} className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Holiday Date</label>
+                <Input
+                  type="date"
+                  value={holidayForm.holiday_date}
+                  onChange={(e) => setHolidayForm({ ...holidayForm, holiday_date: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Holiday Name</label>
+                <Input
+                  value={holidayForm.name}
+                  onChange={(e) => setHolidayForm({ ...holidayForm, name: e.target.value })}
+                  required
+                  placeholder="e.g. Independence Day, Diwali"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Category</label>
+                <select
+                  value={holidayForm.holiday_type}
+                  onChange={(e) => setHolidayForm({ ...holidayForm, holiday_type: e.target.value })}
+                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="public">National / Public</option>
+                  <option value="festival">Festival</option>
+                  <option value="shop">Corporate / Office Off</option>
+                </select>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setShowHoliday(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!holidayForm.name.trim()}>
+                  Add Holiday
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
     </HrShell>
   );

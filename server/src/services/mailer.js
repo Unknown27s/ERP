@@ -20,7 +20,7 @@ function config() {
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 465);
   const secure = String(process.env.SMTP_SECURE || 'true') === 'true';
-  const fromName = process.env.SMTP_FROM_NAME || 'Shree Gold Palace';
+  const fromName = process.env.SMTP_FROM_NAME || process.env.COMPANY_NAME || 'MarvelSoftware';
   const from = user ? `${fromName} <${user}>` : '';
   return { user, pass, host, port, secure, from, fromName };
 }

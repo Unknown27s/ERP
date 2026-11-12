@@ -1,22 +1,67 @@
+/**
+ * ==============================================================================
+ * DESIGN SPECIFICATION: Attendance Tracking & Punch Ingestion (Attendance.tsx)
+ * ==============================================================================
+ * Functional Scope:
+ * - Daily shift attendance tracking (manual entry & bulk biometric punch CSV import).
+ * - Calculations: Worked hours, overtime tracking, punch check-in / check-out.
+ * - Single record per employee per day (idempotent re-import support).
+ * ==============================================================================
+ */
+
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import { api } from '../../../lib/api';
-import Modal from '../../../components/Modal';
-import { ICONS } from '../../../components/icons';
+import {
+  CalendarClock,
+  Upload,
+  Plus,
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  Calendar,
+  FileSpreadsheet,
+} from 'lucide-react';
 import HrShell, { KPI_TINTS, monthName } from './HrShell';
+import { Button } from '../../../components/ui/Button';
+import { Input } from '../../../components/ui/Input';
+import { Badge } from '../../../components/ui/Badge';
+import { Card } from '../../../components/ui/Card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../../components/ui/Dialog';
 
 type Employee = { id: string; emp_code: string; full_name: string; status: string };
 type Row = {
-  id: string; employee_id: string; work_date: string; check_in: string | null; check_out: string | null;
-  status: string; worked_minutes: number; overtime_minutes: number; source: string; note: string | null;
-  full_name: string; emp_code: string; department_name: string | null;
+  id: string;
+  employee_id: string;
+  work_date: string;
+  check_in: string | null;
+  check_out: string | null;
+  status: string;
+  worked_minutes: number;
+  overtime_minutes: number;
+  source: string;
+  note: string | null;
+  full_name: string;
+  emp_code: string;
+  department_name: string | null;
 };
 
 const STATUSES = [
-  ['present', 'Present'], ['absent', 'Absent'], ['half_day', 'Half day'],
-  ['leave', 'Leave'], ['holiday', 'Holiday'], ['week_off', 'Week off'],
+  ['present', 'Present'],
+  ['absent', 'Absent'],
+  ['half_day', 'Half Day'],
+  ['leave', 'On Leave'],
+  ['holiday', 'Holiday'],
+  ['week_off', 'Week Off'],
 ];
-const badge = (s: string) => s === 'present' ? 'ok' : s === 'absent' ? 'err' : s === 'half_day' ? 'warn' : '';
+
 const monthNow = () => new Date().toISOString().slice(0, 7);
 const dayNow = () => new Date().toISOString().slice(0, 10);
 const hhmm = (mins: number) => {
@@ -28,8 +73,13 @@ export default function HRAttendance() {
   const [month, setMonth] = useState(monthNow());
   const [empFilter, setEmpFilter] = useState('');
   const [form, setForm] = useState({
-    employee_id: '', work_date: dayNow(), status: 'present',
-    check_in: '10:00', check_out: '19:00', overtime_minutes: '0', note: '',
+    employee_id: '',
+    work_date: dayNow(),
+    status: 'present',
+    check_in: '10:00',
+    check_out: '19:00',
+    overtime_minutes: '0',
+    note: '',
   });
   const [csv, setCsv] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -44,31 +94,38 @@ export default function HRAttendance() {
 
   const staff: Employee[] = (employees.data?.data || []).filter((e: Employee) => e.status !== 'exited');
   const rows: Row[] = list.data?.data || [];
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const setField = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
   const counts = rows.reduce((acc, r) => {
     acc[r.status] = (acc[r.status] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
+
   const overtimeTotal = rows.reduce((s, r) => s + (Number(r.overtime_minutes) || 0), 0);
 
-  const mark = async () => {
+  const mark = async (e: React.FormEvent) => {
+    e.preventDefault();
     setMsg(null);
     try {
       await api.post('/hr/attendance', {
-        employee_id: form.employee_id, work_date: form.work_date, status: form.status,
-        check_in: form.check_in || null, check_out: form.check_out || null,
-        overtime_minutes: Number(form.overtime_minutes) || 0, note: form.note || null,
+        employee_id: form.employee_id,
+        work_date: form.work_date,
+        status: form.status,
+        check_in: form.check_in || null,
+        check_out: form.check_out || null,
+        overtime_minutes: Number(form.overtime_minutes) || 0,
+        note: form.note || null,
       });
-      setMsg({ ok: true, text: 'Attendance saved.' });
+      setMsg({ ok: true, text: 'Attendance record saved successfully.' });
       setShowMark(false);
       await list.refetch();
-    } catch (e: any) {
-      setMsg({ ok: false, text: e.message || 'Could not save attendance' });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Could not save attendance' });
     }
   };
 
-  const importRows = async () => {
+  const importRows = async (e: React.FormEvent) => {
+    e.preventDefault();
     setMsg(null);
     const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const rowsIn = lines
@@ -76,169 +133,330 @@ export default function HRAttendance() {
       .map((line) => {
         const [emp_code, date, check_in, check_out, status, overtime_minutes] = line.split(',').map((s) => s.trim());
         return {
-          emp_code, date: date || undefined, check_in: check_in || null, check_out: check_out || null,
-          status: status || 'present', overtime_minutes: Number(overtime_minutes) || 0,
+          emp_code,
+          date: date || undefined,
+          check_in: check_in || null,
+          check_out: check_out || null,
+          status: status || 'present',
+          overtime_minutes: Number(overtime_minutes) || 0,
         };
       })
       .filter((r) => r.emp_code && r.date);
-    if (!rowsIn.length) { setMsg({ ok: false, text: 'Paste rows as: emp_code,date,check_in,check_out,status' }); return; }
+
+    if (!rowsIn.length) {
+      setMsg({ ok: false, text: 'Paste CSV rows as: emp_code,date,check_in,check_out,status' });
+      return;
+    }
+
     try {
       const r = await api.post('/hr/attendance/import', { source: 'biometric', rows: rowsIn });
       const d = r.data;
       const hint = d.errors?.length ? ` First error: ${d.errors[0].error}` : '';
-      setMsg({ ok: d.failed === 0, text: `${d.imported} imported, ${d.failed} failed.${hint}` });
+      setMsg({ ok: d.failed === 0, text: `Import complete: ${d.imported} processed, ${d.failed} failed.${hint}` });
       if (d.failed === 0) setShowImport(false);
       await list.refetch();
-    } catch (e: any) {
-      setMsg({ ok: false, text: e.message || 'Import failed' });
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Import failed' });
     }
   };
 
   return (
     <HrShell
-      title="Attendance"
-      subtitle="Mark attendance manually or import a biometric/CSV export. One record per employee per day — re-importing a day updates it."
+      title="Attendance &amp; Punches"
+      subtitle="Ingest automated biometric punches or manually record daily check-in / check-out times."
       kpis={[
-        { label: 'Present', value: String(counts.present || 0), meta: monthName(month), icon: ICONS.shield, ...KPI_TINTS.green },
-        { label: 'Half day', value: String(counts.half_day || 0), meta: 'part-day shifts', icon: ICONS.calendar, ...KPI_TINTS.amber },
-        { label: 'Absent', value: String(counts.absent || 0), meta: 'marked absent', icon: ICONS.audit, ...KPI_TINTS.red },
-        { label: 'Overtime', value: hhmm(overtimeTotal), meta: 'logged this month', icon: ICONS.trending, ...KPI_TINTS.blue },
+        { label: 'Logged Entries', value: String(rows.length), meta: monthName(month), ...KPI_TINTS.blue },
+        { label: 'Present', value: String(counts.present || 0), meta: 'Full day worked', ...KPI_TINTS.green },
+        { label: 'Absent', value: String(counts.absent || 0), meta: 'Unexcused / unpaid', ...KPI_TINTS.red },
+        { label: 'Total Overtime', value: hhmm(overtimeTotal), meta: 'Approved extra hours', ...KPI_TINTS.amber },
       ]}
       actions={
-        <>
-          <button className="btn gold" onClick={() => { setMsg(null); setShowMark(true); }}>+ Mark attendance</button>
-          <button className="btn ghost" onClick={() => { setMsg(null); setShowImport(true); }}>Import CSV</button>
-          <button className="btn ghost" onClick={() => list.refetch()}>Refresh</button>
-        </>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowImport(true)} className="gap-1.5 shadow-sm">
+            <Upload className="w-4 h-4 text-slate-500" />
+            <span>Import Biometric CSV</span>
+          </Button>
+          <Button onClick={() => setShowMark(true)} className="gap-1.5 shadow-sm">
+            <Plus className="w-4 h-4" />
+            <span>Mark Attendance</span>
+          </Button>
+        </div>
       }
     >
-      {msg && <div className={`hr-msg${msg.ok ? '' : ' err'}`}>{msg.text}</div>}
+      {/* Alert Banner */}
+      {msg && (
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
+            msg.ok
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          <span>{msg.text}</span>
+        </div>
+      )}
 
-      <div className="hr-card">
-        <div className="hr-card-head">
-          <h2>Attendance register</h2>
-          <span className="sub">{rows.length} records</span>
-          <div className="hr-card-actions">
-            <input type="month" style={{ maxWidth: 170 }} value={month} onChange={(e) => setMonth(e.target.value)} />
-            <select style={{ maxWidth: 240 }} value={empFilter} onChange={(e) => setEmpFilter(e.target.value)}>
-              <option value="">All employees</option>
-              {staff.map((e) => <option key={e.id} value={e.id}>{e.emp_code} · {e.full_name}</option>)}
-            </select>
+      {/* Control Bar: Month Picker & Employee Filter */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 bg-white shadow-sm text-xs">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="border-0 p-0 text-xs font-semibold text-slate-800 focus:outline-none"
+            />
           </div>
+
+          <select
+            value={empFilter}
+            onChange={(e) => setEmpFilter(e.target.value)}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 shadow-sm max-w-xs"
+          >
+            <option value="">All Staff Members</option>
+            {staff.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.emp_code} — {e.full_name}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="hr-card-body" style={{ paddingBottom: 14 }}>
-          <div className="hr-inline-stats">
-            <span className="hr-stat ok">Present {counts.present || 0}</span>
-            <span className="hr-stat warn">Half day {counts.half_day || 0}</span>
-            <span className="hr-stat err">Absent {counts.absent || 0}</span>
-            <span className="hr-stat">Leave {counts.leave || 0}</span>
-            <span className="hr-stat">Week off {counts.week_off || 0}</span>
-            <span className="hr-stat">Holiday {counts.holiday || 0}</span>
-          </div>
-        </div>
-        <div className="tbl-wrap">
-          <table className="tbl">
-            <thead><tr><th>Date</th><th>Employee</th><th>In / out</th><th>Worked</th><th>OT</th><th>Status</th><th>Source</th></tr></thead>
-            <tbody>
+
+        <span className="text-xs text-slate-500 font-medium">
+          {rows.length} {rows.length === 1 ? 'record' : 'records'} for {monthName(month)}
+        </span>
+      </div>
+
+      {/* Attendance Records Table */}
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs text-slate-700">
+            <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="py-3 px-4">Date</th>
+                <th className="py-3 px-4">Employee</th>
+                <th className="py-3 px-4">Check In</th>
+                <th className="py-3 px-4">Check Out</th>
+                <th className="py-3 px-4">Hours</th>
+                <th className="py-3 px-4">Overtime</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4">Source</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {list.isLoading && (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                    Loading attendance entries…
+                  </td>
+                </tr>
+              )}
+              {!list.isLoading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                    No attendance records logged for {monthName(month)}.
+                  </td>
+                </tr>
+              )}
               {rows.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.work_date}</td>
-                  <td>{r.full_name}<br /><small style={{ color: 'var(--color-muted)' }}>{r.emp_code}{r.department_name ? ` · ${r.department_name}` : ''}</small></td>
-                  <td>{r.check_in || '—'} / {r.check_out || '—'}</td>
-                  <td>{hhmm(r.worked_minutes)}</td>
-                  <td>{r.overtime_minutes ? hhmm(r.overtime_minutes) : '—'}</td>
-                  <td><span className={`badge ${badge(r.status)}`}>{r.status.replace('_', ' ')}</span></td>
-                  <td><small style={{ color: 'var(--color-muted)' }}>{r.source}{r.note ? ` · ${r.note}` : ''}</small></td>
+                <tr key={r.id} className="hover:bg-slate-50/70 transition-colors">
+                  <td className="py-3 px-4 font-mono font-semibold text-slate-800">{r.work_date}</td>
+                  <td className="py-3 px-4">
+                    <span className="font-semibold text-slate-900">{r.full_name}</span>
+                    <span className="font-mono text-[11px] text-slate-400 ml-1.5">({r.emp_code})</span>
+                    {r.department_name && (
+                      <span className="text-[11px] text-slate-400 block">{r.department_name}</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 font-mono text-slate-600">{r.check_in || '—'}</td>
+                  <td className="py-3 px-4 font-mono text-slate-600">{r.check_out || '—'}</td>
+                  <td className="py-3 px-4 font-semibold text-slate-800">{hhmm(r.worked_minutes)}</td>
+                  <td className="py-3 px-4">
+                    {r.overtime_minutes > 0 ? (
+                      <span className="text-amber-700 font-semibold font-mono">
+                        +{hhmm(r.overtime_minutes)}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4">
+                    <Badge
+                      variant={
+                        r.status === 'present'
+                          ? 'success'
+                          : r.status === 'half_day'
+                          ? 'warning'
+                          : r.status === 'absent'
+                          ? 'destructive'
+                          : 'info'
+                      }
+                    >
+                      {r.status.replace('_', ' ')}
+                    </Badge>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">
+                      {r.source}
+                    </span>
+                  </td>
                 </tr>
               ))}
-              {!rows.length && <tr><td colSpan={7}><div className="empty">{list.isLoading ? 'Loading…' : 'No attendance recorded for this month.'}</div></td></tr>}
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
+
+      {/* Manual Mark Dialog */}
       {showMark && (
-        <Modal
-          title="Mark attendance"
-          subtitle="One record per employee per day — saving again updates the day."
-          onClose={() => setShowMark(false)}
-          size="md"
-          footer={
-            <>
-              <span className="grow" />
-              <button type="button" className="btn ghost" onClick={() => setShowMark(false)}>Cancel</button>
-              <button type="submit" form="attendance-form" className="btn gold" disabled={!form.employee_id}>Save attendance</button>
-            </>
-          }
-        >
-          {msg && !msg.ok && <div className="err-box" style={{ marginBottom: 12 }}>{msg.text}</div>}
-          <form id="attendance-form" onSubmit={(e) => { e.preventDefault(); mark(); }}>
-            <div className="hr-form-grid">
-              <div className="hr-field span-2">
-                <label className="lbl" htmlFor="att-employee">Employee</label>
-                <select id="att-employee" value={form.employee_id} onChange={(e) => set('employee_id', e.target.value)}>
-                  <option value="">Select employee</option>
-                  {staff.map((e) => <option key={e.id} value={e.id}>{e.emp_code} · {e.full_name}</option>)}
+        <Dialog open={true} onOpenChange={() => setShowMark(false)}>
+          <DialogContent size="md">
+            <DialogHeader>
+              <DialogTitle>Mark Daily Attendance</DialogTitle>
+              <DialogDescription>
+                Record manual check-in, check-out, and status override for a staff member.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={mark} className="space-y-4 pt-2">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Staff Member *</label>
+                <select
+                  value={form.employee_id}
+                  onChange={(e) => setField('employee_id', e.target.value)}
+                  required
+                  className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  <option value="">Select Employee…</option>
+                  {staff.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.emp_code} — {s.full_name}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="att-date">Date</label>
-                <input id="att-date" type="date" value={form.work_date} onChange={(e) => set('work_date', e.target.value)} />
+
+              <div className="grid grid-cols-2 gap-3.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Work Date *</label>
+                  <Input
+                    type="date"
+                    value={form.work_date}
+                    onChange={(e) => setField('work_date', e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Status *</label>
+                  <select
+                    value={form.status}
+                    onChange={(e) => setField('status', e.target.value)}
+                    className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {STATUSES.map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="att-status">Status</label>
-                <select id="att-status" value={form.status} onChange={(e) => set('status', e.target.value)}>
-                  {STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
+
+              <div className="grid grid-cols-3 gap-3.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Check In</label>
+                  <Input
+                    type="time"
+                    value={form.check_in}
+                    onChange={(e) => setField('check_in', e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Check Out</label>
+                  <Input
+                    type="time"
+                    value={form.check_out}
+                    onChange={(e) => setField('check_out', e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Overtime (Mins)</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    value={form.overtime_minutes}
+                    onChange={(e) => setField('overtime_minutes', e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="att-in">Check in</label>
-                <input id="att-in" type="time" value={form.check_in} onChange={(e) => set('check_in', e.target.value)} />
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Operational Note</label>
+                <Input
+                  value={form.note}
+                  onChange={(e) => setField('note', e.target.value)}
+                  placeholder="e.g. Field visit, approved late check-in"
+                />
               </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="att-out">Check out</label>
-                <input id="att-out" type="time" value={form.check_out} onChange={(e) => set('check_out', e.target.value)} />
-              </div>
-              <div className="hr-field">
-                <label className="lbl" htmlFor="att-ot">Overtime (minutes)</label>
-                <input id="att-ot" type="number" min={0} value={form.overtime_minutes} onChange={(e) => set('overtime_minutes', e.target.value)} />
-              </div>
-              <div className="hr-field span-2">
-                <label className="lbl" htmlFor="att-note">Note</label>
-                <input id="att-note" value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="Optional" />
-              </div>
-            </div>
-          </form>
-        </Modal>
+
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setShowMark(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!form.employee_id || !form.work_date}>
+                  Save Attendance
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
 
+      {/* Biometric CSV Import Dialog */}
       {showImport && (
-        <Modal
-          title="Biometric / CSV import"
-          subtitle="Bulk upsert attendance for many employees at once."
-          onClose={() => setShowImport(false)}
-          size="md"
-          footer={
-            <>
-              <span className="modal-hint">Imported rows are marked source biometric.</span>
-              <span className="grow" />
-              <button type="button" className="btn ghost" onClick={() => setShowImport(false)}>Cancel</button>
-              <button type="button" className="btn gold" onClick={importRows} disabled={!csv.trim()}>Import rows</button>
-            </>
-          }
-        >
-          {msg && !msg.ok && <div className="err-box" style={{ marginBottom: 12 }}>{msg.text}</div>}
-          <p style={{ color: 'var(--color-muted)', fontSize: 13, marginTop: 0, lineHeight: 1.6 }}>
-            One row per line: <code>emp_code,date,check_in,check_out,status</code>. Times are 24h HH:MM; status defaults to present.
-          </p>
-          <textarea
-            rows={9}
-            value={csv}
-            onChange={(e) => setCsv(e.target.value)}
-            style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12.5, lineHeight: 1.6 }}
-            placeholder={'EMP001,2026-11-01,10:02,19:11,present\nEMP002,2026-11-01,10:15,19:05,present'}
-          />
-          {csv.trim() && <button type="button" className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setCsv('')}>Clear</button>}
-        </Modal>
+        <Dialog open={true} onOpenChange={() => setShowImport(false)}>
+          <DialogContent size="lg">
+            <DialogHeader>
+              <DialogTitle>Import Biometric Punch Records</DialogTitle>
+              <DialogDescription>
+                Paste CSV exported from your biometric attendance machine or punch scanner.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={importRows} className="space-y-4 pt-2">
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs space-y-1 text-slate-600 font-mono">
+                <div className="font-bold text-slate-800">Expected Format (Comma Separated):</div>
+                <div>emp_code, date (YYYY-MM-DD), check_in (HH:MM), check_out (HH:MM), status</div>
+                <div className="text-slate-400">Example: EMP-101, 2026-11-12, 09:30, 18:30, present</div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Paste CSV Rows</label>
+                <textarea
+                  rows={8}
+                  value={csv}
+                  onChange={(e) => setCsv(e.target.value)}
+                  placeholder="EMP-101,2026-11-12,09:30,18:30,present&#10;EMP-102,2026-11-12,10:00,19:00,present"
+                  className="w-full rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setShowImport(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!csv.trim()}>
+                  Process Biometric Import
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
     </HrShell>
   );

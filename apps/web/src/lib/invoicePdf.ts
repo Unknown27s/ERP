@@ -78,13 +78,13 @@ export function downloadInvoicePdf(sale: SaleInvoiceData) {
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setTextColor(220, 205, 185);
-  doc.text('Certified BIS Hallmarked Gold & Fine Diamond Jewellery', margin + 6, y + 16);
+  doc.setTextColor(220, 225, 230);
+  doc.text('Commercial Tax Invoice & Official Delivery Receipt', margin + 6, y + 16);
 
   // TAX INVOICE tag on top right
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
-  doc.setTextColor(214, 180, 92); // Gold tone
+  doc.setTextColor(79, 70, 229); // Accent
   doc.text('TAX INVOICE', pageWidth - margin - 6, y + 10, { align: 'right' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
@@ -326,13 +326,13 @@ export function downloadInvoicePdf(sale: SaleInvoiceData) {
   doc.setFontSize(7.5);
   doc.setTextColor(130, 120, 115);
   doc.text('Terms & Conditions:', margin, y);
-  doc.text('1. Gold jewellery is 100% certified BIS hallmarked. Certified weights & purity guaranteed.', margin, y + 4);
-  doc.text('2. Please retain this original tax invoice for lifetime exchange and guarantee services.', margin, y + 8);
-  doc.text('3. Goods once sold can be exchanged as per store policy within 7 days in original condition.', margin, y + 12);
+  doc.text('1. Computer generated tax invoice issued under applicable commercial sales regulations.', margin, y + 4);
+  doc.text('2. Please retain this original tax invoice for warranty, audit and tax compliance records.', margin, y + 8);
+  doc.text('3. Goods or services once billed are governed by standard enterprise service level agreements.', margin, y + 12);
 
   // Authorized Signatory
   const sigX = pageWidth - margin - 50;
-  doc.text('For ' + (sale.shop_name || 'AURUM LUXE JEWELLERS'), sigX, y + 4);
+  doc.text('For ' + (sale.shop_name || 'ENTERPRISE ERP'), sigX, y + 4);
   doc.line(sigX, y + 15, sigX + 45, y + 15);
   doc.text('Authorized Signatory', sigX + 6, y + 19);
 

@@ -1,323 +1,517 @@
+/**
+ * ==============================================================================
+ * DESIGN SPECIFICATION: Employee Master Directory (Employees.tsx)
+ * ==============================================================================
+ * Functional Scope:
+ * - Comprehensive staff records for HR, biometric attendance, and monthly payroll.
+ * - Filters by employment status (Active, Notice Period, Exited, All).
+ * - Employee Form Dialog: Code, Contact, Department/Designation link, Joining Date,
+ *   PAN, and Bank account for statutory payroll disbursements.
+ * ==============================================================================
+ */
+
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import { api } from '../../../lib/api';
-import Modal from '../../../components/Modal';
-import { ICONS } from '../../../components/icons';
+import {
+  UserCheck,
+  Plus,
+  Search,
+  Building2,
+  Briefcase,
+  AlertCircle,
+  CheckCircle2,
+  Calendar,
+  LogOut,
+  Mail,
+  Phone,
+} from 'lucide-react';
 import HrShell, { KPI_TINTS, useHrOverview } from './HrShell';
+import { Button } from '../../../components/ui/Button';
+import { Input } from '../../../components/ui/Input';
+import { Badge } from '../../../components/ui/Badge';
+import { Card } from '../../../components/ui/Card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '../../../components/ui/Dialog';
 
 type Employee = {
-  id: string; emp_code: string; full_name: string; phone: string | null; email: string | null;
-  dob: string | null; gender: string | null; joining_date: string; exit_date: string | null;
-  employment_type: string; status: string; department_id: string | null; designation_id: string | null;
-  branch_id: string | null; department_name: string | null; designation_name: string | null;
-  branch_name: string | null; pan: string | null; bank_account: string | null; bank_ifsc: string | null;
+  id: string;
+  emp_code: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  dob: string | null;
+  gender: string | null;
+  joining_date: string;
+  exit_date: string | null;
+  employment_type: string;
+  status: string;
+  department_id: string | null;
+  designation_id: string | null;
+  branch_id: string | null;
+  department_name: string | null;
+  designation_name: string | null;
+  branch_name: string | null;
+  pan: string | null;
+  bank_account: string | null;
+  bank_ifsc: string | null;
 };
+
 type Lookup = { id: string; name: string; grade?: string | null };
 
-const EMPTY = {
-  emp_code: '', full_name: '', phone: '', email: '', dob: '', gender: '', joining_date: '',
-  employment_type: 'full_time', status: 'active', department_id: '', designation_id: '',
-  branch_id: '', pan: '', bank_account: '', bank_ifsc: '',
+const EMPTY_FORM = {
+  emp_code: '',
+  full_name: '',
+  phone: '',
+  email: '',
+  dob: '',
+  gender: '',
+  joining_date: '',
+  employment_type: 'full_time',
+  status: 'active',
+  department_id: '',
+  designation_id: '',
+  branch_id: '',
+  pan: '',
+  bank_account: '',
+  bank_ifsc: '',
 };
 
-const GENDERS: Array<[string, string]> = [['', '—'], ['female', 'Female'], ['male', 'Male'], ['other', 'Other']];
-const EMPLOYMENT_TYPES: Array<[string, string]> = [
-  ['full_time', 'Full time'], ['part_time', 'Part time'], ['contract', 'Contract'], ['trainee', 'Trainee'],
+const GENDERS: Array<[string, string]> = [
+  ['', 'Select Gender…'],
+  ['female', 'Female'],
+  ['male', 'Male'],
+  ['other', 'Other'],
 ];
-const STATUSES: Array<[string, string]> = [['active', 'Active'], ['notice', 'Notice period'], ['exited', 'Exited']];
-const FILTERS = ['active', 'notice', 'exited', 'all'];
+
+const EMPLOYMENT_TYPES: Array<[string, string]> = [
+  ['full_time', 'Full Time'],
+  ['part_time', 'Part Time'],
+  ['contract', 'Contractual'],
+  ['trainee', 'Trainee / Intern'],
+];
+
+const STATUS_FILTERS = [
+  { key: 'active', label: 'Active' },
+  { key: 'notice', label: 'On Notice' },
+  { key: 'exited', label: 'Exited' },
+  { key: 'all', label: 'All Records' },
+];
 
 export default function HREmployees() {
   const [status, setStatus] = useState('active');
-  const [q, setQ] = useState('');
-  const [form, setForm] = useState({ ...EMPTY });
+  const [search, setSearch] = useState('');
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editId, setEditId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [deptName, setDeptName] = useState('');
-  const [desigName, setDesigName] = useState('');
   const [showForm, setShowForm] = useState(false);
 
+  // Queries for employee records and dropdown lookups
   const list = useQuery({
-    queryKey: ['hr-employees', status, q],
-    queryFn: () => api.get(`/hr/employees?status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`),
+    queryKey: ['hr-employees', status, search],
+    queryFn: () =>
+      api.get(`/hr/employees?status=${encodeURIComponent(status)}&q=${encodeURIComponent(search)}`),
   });
-  const all = useQuery({ queryKey: ['hr-employees-all'], queryFn: () => api.get('/hr/employees?status=all') });
+
+  const allQuery = useQuery({
+    queryKey: ['hr-employees-all'],
+    queryFn: () => api.get('/hr/employees?status=all'),
+  });
+
   const depts = useQuery({ queryKey: ['hr-departments'], queryFn: () => api.get('/hr/departments') });
   const desigs = useQuery({ queryKey: ['hr-designations'], queryFn: () => api.get('/hr/designations') });
-  const branches = useQuery({ queryKey: ['hr-branches'], queryFn: () => api.get('/hr/branches') });
   const overview = useHrOverview();
 
   const employees: Employee[] = list.data?.data || [];
-  const everyone: Employee[] = all.data?.data || [];
+  const everyone: Employee[] = allQuery.data?.data || [];
   const departments: Lookup[] = depts.data?.data || [];
   const designations: Lookup[] = desigs.data?.data || [];
-  const branchList: Lookup[] = branches.data?.data || [];
-  const countOf = (s: string) => (all.isLoading ? '—' : String(everyone.filter((e) => e.status === s).length));
+
+  const countOf = (s: string) =>
+    allQuery.isLoading ? '—' : String(everyone.filter((e) => e.status === s).length);
 
   const refresh = () => Promise.all([list.refetch(), depts.refetch(), desigs.refetch()]);
-  const act = async (fn: () => Promise<unknown>, ok: string) => {
-    setMsg(null);
-    try {
-      await fn();
-      setMsg({ ok: true, text: ok });
-      await refresh();
-      return true;
-    } catch (e: any) {
-      setMsg({ ok: false, text: e.message || 'Something went wrong' });
-      return false;
-    }
-  };
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const reset = () => { setEditId(null); setForm({ ...EMPTY }); };
 
-  const submit = async () => {
+  const setField = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const reset = () => {
+    setEditId(null);
+    setForm({ ...EMPTY_FORM });
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
     const payload: any = { ...form };
-    for (const k of ['department_id', 'designation_id', 'branch_id']) if (!payload[k]) payload[k] = null;
-    const done = await act(
-      () => (editId ? api.patch(`/hr/employees/${editId}`, payload) : api.post('/hr/employees', payload)),
-      editId ? 'Employee updated.' : 'Employee added.',
-    );
-    if (done) { reset(); setShowForm(false); }
+    for (const k of ['department_id', 'designation_id', 'branch_id']) {
+      if (!payload[k]) payload[k] = null;
+    }
+
+    try {
+      if (editId) {
+        await api.patch(`/hr/employees/${editId}`, payload);
+        setMsg({ ok: true, text: 'Employee profile updated successfully.' });
+      } else {
+        await api.post('/hr/employees', payload);
+        setMsg({ ok: true, text: 'Employee created successfully.' });
+      }
+      await refresh();
+      reset();
+      setShowForm(false);
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Operation failed.' });
+    }
   };
 
   const startEdit = (e: Employee) => {
     setEditId(e.id);
     setForm({
-      emp_code: e.emp_code, full_name: e.full_name, phone: e.phone || '', email: e.email || '',
-      dob: e.dob || '', gender: e.gender || '', joining_date: e.joining_date,
-      employment_type: e.employment_type, status: e.status,
-      department_id: e.department_id || '', designation_id: e.designation_id || '',
-      branch_id: e.branch_id || '', pan: e.pan || '', bank_account: e.bank_account || '',
+      emp_code: e.emp_code,
+      full_name: e.full_name,
+      phone: e.phone || '',
+      email: e.email || '',
+      dob: e.dob || '',
+      gender: e.gender || '',
+      joining_date: e.joining_date,
+      employment_type: e.employment_type,
+      status: e.status,
+      department_id: e.department_id || '',
+      designation_id: e.designation_id || '',
+      branch_id: e.branch_id || '',
+      pan: e.pan || '',
+      bank_account: e.bank_account || '',
       bank_ifsc: e.bank_ifsc || '',
     });
     setShowForm(true);
   };
 
-  const markExited = (e: Employee) => {
-    if (!window.confirm(`Mark ${e.full_name} as exited today? Payroll history is preserved.`)) return;
+  const markExited = async (e: Employee) => {
+    if (!window.confirm(`Mark ${e.full_name} as exited today? Historical payroll will be preserved.`)) return;
     const today = new Date().toISOString().slice(0, 10);
-    act(() => api.patch(`/hr/employees/${e.id}`, { status: 'exited', exit_date: today }), 'Employee marked exited.');
+    try {
+      await api.patch(`/hr/employees/${e.id}`, { status: 'exited', exit_date: today });
+      setMsg({ ok: true, text: `${e.full_name} has been marked exited.` });
+      refresh();
+    } catch (err: any) {
+      setMsg({ ok: false, text: err.message || 'Action failed.' });
+    }
   };
-
-  const addDept = () => {
-    if (!deptName.trim()) return;
-    act(() => api.post('/hr/departments', { name: deptName.trim() }), 'Department added.').then((ok) => ok && setDeptName(''));
-  };
-  const addDesig = () => {
-    if (!desigName.trim()) return;
-    act(() => api.post('/hr/designations', { name: desigName.trim() }), 'Designation added.').then((ok) => ok && setDesigName(''));
-  };
-  const removeDept = (d: Lookup) => window.confirm(`Delete department ${d.name}?`) &&
-    act(() => api.del(`/hr/departments/${d.id}`), 'Department deleted.');
-  const removeDesig = (d: Lookup) => window.confirm(`Delete designation ${d.name}?`) &&
-    act(() => api.del(`/hr/designations/${d.id}`), 'Designation deleted.');
-
-  const textField = (k: keyof typeof form, label: string, type = 'text', cls = '') => (
-    <div className={`hr-field ${cls}`.trim()} key={k}>
-      <label className="lbl" htmlFor={`emp-${k}`}>{label}</label>
-      <input id={`emp-${k}`} type={type} value={form[k]} onChange={(e) => set(k, e.target.value)} />
-    </div>
-  );
-
-  const selectField = (k: keyof typeof form, label: string, options: Array<[string, string]>) => (
-    <div className="hr-field" key={k}>
-      <label className="lbl" htmlFor={`emp-${k}`}>{label}</label>
-      <select id={`emp-${k}`} value={form[k]} onChange={(e) => set(k, e.target.value)}>
-        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-    </div>
-  );
 
   return (
     <HrShell
-      title="Employees"
-      subtitle={<>Employee records for payroll and attendance. Logins stay in <strong>Staff Management</strong> — an employee does not need a login (karigars, housekeeping, contract staff).</>}
+      title="Employees Directory"
+      subtitle="Master records for payroll, biometric attendance, and statutory reporting."
       kpis={[
-        { label: 'Headcount', value: overview ? String(overview.headcount) : '—', meta: 'active & notice period', icon: ICONS.staff, ...KPI_TINTS.gold },
-        { label: 'Active', value: countOf('active'), meta: 'currently working', icon: ICONS.shield, ...KPI_TINTS.green },
-        { label: 'On notice', value: countOf('notice'), meta: 'serving notice period', icon: ICONS.calendar, ...KPI_TINTS.amber },
-        { label: 'Exited', value: countOf('exited'), meta: 'records retained', icon: ICONS.audit, ...KPI_TINTS.rose },
+        { label: 'Headcount', value: overview ? String(overview.headcount) : '—', meta: 'Active & notice staff', ...KPI_TINTS.gold },
+        { label: 'Active', value: countOf('active'), meta: 'Currently on payroll', ...KPI_TINTS.green },
+        { label: 'On Notice', value: countOf('notice'), meta: 'Serving exit notice', ...KPI_TINTS.amber },
+        { label: 'Exited', value: countOf('exited'), meta: 'Historical records retained', ...KPI_TINTS.rose },
       ]}
-      actions={<button className="btn gold" onClick={() => { reset(); setShowForm(true); }}>Add employee</button>}
+      actions={
+        <Button onClick={() => { reset(); setShowForm(true); }} className="gap-1.5 shadow-sm">
+          <Plus className="w-4 h-4" />
+          <span>Add Employee</span>
+        </Button>
+      }
     >
-      {msg && <div className={`hr-msg${msg.ok ? '' : ' err'}`}>{msg.text}</div>}
-
-      <div className="hr-card">
-        <div className="hr-card-head">
-          <h2>Employee directory</h2>
-          <span className="sub">{employees.length} shown</span>
-          <div className="hr-card-actions">
-            <input
-              style={{ maxWidth: 240 }}
-              placeholder="Search name / code / phone"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <div className="hr-segments" role="group" aria-label="Filter by status">
-              {FILTERS.map((s) => (
-                <button
-                  key={s}
-                  className={`hr-segment${status === s ? ' active' : ''}`}
-                  onClick={() => setStatus(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* Alert Banner */}
+      {msg && (
+        <div
+          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
+            msg.ok
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          <span>{msg.text}</span>
         </div>
-        <div className="tbl-wrap">
-          <table className="tbl">
-            <thead>
+      )}
+
+      {/* Control Bar: Search & Status Filter Pills */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="relative max-w-sm w-full">
+          <Input
+            placeholder="Search by name, emp code, phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            icon={<Search className="w-4 h-4" />}
+          />
+        </div>
+
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStatus(f.key)}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                status === f.key
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Employee Data Table */}
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs text-slate-700">
+            <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
               <tr>
-                <th>Code</th><th>Name</th><th>Department / role</th><th>Joined</th><th>Status</th><th>Actions</th>
+                <th className="py-3 px-4">Code</th>
+                <th className="py-3 px-4">Employee</th>
+                <th className="py-3 px-4">Department &amp; Title</th>
+                <th className="py-3 px-4">Joined Date</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
+              {list.isLoading && (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                    Loading employee directory…
+                  </td>
+                </tr>
+              )}
+              {!list.isLoading && employees.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                    No employees found matching filter criteria.
+                  </td>
+                </tr>
+              )}
               {employees.map((e) => (
-                <tr key={e.id}>
-                  <td><code>{e.emp_code}</code></td>
-                  <td>
-                    {e.full_name}
-                    <br />
-                    <small style={{ color: 'var(--color-muted)' }}>{e.phone || 'no phone'} · {e.employment_type.replace('_', ' ')}</small>
+                <tr key={e.id} className="hover:bg-slate-50/70 transition-colors">
+                  <td className="py-3 px-4 font-mono font-bold text-slate-900">{e.emp_code}</td>
+                  <td className="py-3 px-4">
+                    <div className="font-semibold text-slate-900">{e.full_name}</div>
+                    <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                      {e.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{e.email}</span>}
+                      {e.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{e.phone}</span>}
+                    </div>
                   </td>
-                  <td>
-                    {e.department_name || '—'}
-                    <br />
-                    <small style={{ color: 'var(--color-muted)' }}>{e.designation_name || '—'}{e.branch_name ? ` · ${e.branch_name}` : ''}</small>
+                  <td className="py-3 px-4">
+                    <div className="text-slate-800 font-medium">{e.department_name || '—'}</div>
+                    <div className="text-[11px] text-slate-500">{e.designation_name || '—'}</div>
                   </td>
-                  <td>
+                  <td className="py-3 px-4 text-slate-600">
                     {e.joining_date}
-                    {e.exit_date ? <><br /><small style={{ color: 'var(--color-muted)' }}>exited {e.exit_date}</small></> : null}
+                    {e.exit_date && <div className="text-[10px] text-rose-500">Exited {e.exit_date}</div>}
                   </td>
-                  <td><span className={`badge ${e.status === 'active' ? 'ok' : e.status === 'notice' ? 'warn' : 'err'}`}>{e.status}</span></td>
-                  <td>
-                    <div className="hr-row-actions">
-                      <button className="btn ghost sm" onClick={() => startEdit(e)}>Edit</button>
-                      {e.status !== 'exited' && <button className="btn ghost sm" onClick={() => markExited(e)}>Exit</button>}
+                  <td className="py-3 px-4">
+                    <Badge
+                      variant={
+                        e.status === 'active'
+                          ? 'success'
+                          : e.status === 'notice'
+                          ? 'warning'
+                          : 'destructive'
+                      }
+                    >
+                      {e.status === 'active' ? 'Active' : e.status === 'notice' ? 'On Notice' : 'Exited'}
+                    </Badge>
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    <div className="inline-flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => startEdit(e)}
+                        className="h-7 px-2.5 text-[11px]"
+                      >
+                        Edit
+                      </Button>
+                      {e.status !== 'exited' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => markExited(e)}
+                          className="h-7 px-2 text-[11px] text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>
               ))}
-              {!employees.length && (
-                <tr><td colSpan={6}><div className="empty">{list.isLoading ? 'Loading…' : 'No employees match this filter.'}</div></td></tr>
-              )}
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
 
-        <div className="hr-card">
-          <div className="hr-card-head">
-            <h2>Departments &amp; designations</h2>
-            <span className="sub">Used across payroll and attendance</span>
-          </div>
-          <div className="hr-card-body">
-            <p className="hr-section-label">Departments</p>
-            <div className="hr-toolbar">
-              <input
-                className="grow"
-                value={deptName}
-                onChange={(e) => setDeptName(e.target.value)}
-                placeholder="e.g. Sales"
-                onKeyDown={(e) => e.key === 'Enter' && addDept()}
-              />
-              <button className="btn ghost sm" onClick={addDept}>Add</button>
-            </div>
-            <div className="hr-chip-list">
-              {departments.map((d) => (
-                <span key={d.id} className="hr-chip">
-                  {d.name}
-                  <button onClick={() => removeDept(d)} title="Delete department" aria-label={`Delete ${d.name}`}>×</button>
-                </span>
-              ))}
-              {!departments.length && <small style={{ color: 'var(--color-muted)' }}>None yet.</small>}
-            </div>
-
-            <p className="hr-section-label" style={{ marginTop: 20 }}>Designations</p>
-            <div className="hr-toolbar">
-              <input
-                className="grow"
-                value={desigName}
-                onChange={(e) => setDesigName(e.target.value)}
-                placeholder="e.g. Sales Executive"
-                onKeyDown={(e) => e.key === 'Enter' && addDesig()}
-              />
-              <button className="btn ghost sm" onClick={addDesig}>Add</button>
-            </div>
-            <div className="hr-chip-list">
-              {designations.map((d) => (
-                <span key={d.id} className="hr-chip">
-                  {d.name}{d.grade ? <small style={{ color: 'var(--color-muted)' }}>{d.grade}</small> : null}
-                  <button onClick={() => removeDesig(d)} title="Delete designation" aria-label={`Delete ${d.name}`}>×</button>
-                </span>
-              ))}
-              {!designations.length && <small style={{ color: 'var(--color-muted)' }}>None yet.</small>}
-            </div>
-
-            <p style={{ color: 'var(--color-muted)', fontSize: 12.5, marginTop: 18, lineHeight: 1.6 }}>
-              Salary structures are set on the <strong>Payroll</strong> page. Attendance and leave live in their own tabs.
-            </p>
-          </div>
-        </div>
+      {/* Add / Edit Employee Dialog */}
       {showForm && (
-        <Modal
-          title={editId ? 'Edit employee' : 'Add employee'}
-          subtitle={editId ? `Editing ${form.full_name || form.emp_code}` : 'Employee records are separate from login accounts.'}
-          onClose={() => { setShowForm(false); reset(); }}
-          size="lg"
-          footer={
-            <>
-              <span className="grow" />
-              <button type="button" className="btn ghost" onClick={() => { setShowForm(false); reset(); }}>Cancel</button>
-              <button
-                type="submit"
-                form="employee-form"
-                className="btn gold"
-                disabled={!form.emp_code || !form.full_name || !form.joining_date}
-              >
-                {editId ? 'Save changes' : 'Add employee'}
-              </button>
-            </>
-          }
-        >
-          {msg && !msg.ok && <div className="err-box" style={{ marginBottom: 12 }}>{msg.text}</div>}
-          <form id="employee-form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-            <fieldset className="hr-fieldset">
-              <legend>Basic details</legend>
-              <div className="hr-form-grid">
-                {textField('emp_code', 'Employee code *')}
-                {textField('full_name', 'Full name *')}
-                {textField('phone', 'Phone')}
-                {textField('email', 'Email', 'email')}
-                {textField('dob', 'Date of birth', 'date')}
-                {selectField('gender', 'Gender', GENDERS)}
-              </div>
-            </fieldset>
+        <Dialog open={true} onOpenChange={() => setShowForm(false)}>
+          <DialogContent size="lg">
+            <DialogHeader>
+              <DialogTitle>{editId ? 'Edit Employee Details' : 'Add New Employee Record'}</DialogTitle>
+              <DialogDescription>
+                Fill staff information for attendance tracking, organization structure, and payroll calculations.
+              </DialogDescription>
+            </DialogHeader>
 
-            <fieldset className="hr-fieldset">
-              <legend>Employment</legend>
-              <div className="hr-form-grid">
-                {textField('joining_date', 'Joining date *', 'date')}
-                {selectField('employment_type', 'Employment type', EMPLOYMENT_TYPES)}
-                {selectField('status', 'Status', STATUSES)}
-                {selectField('department_id', 'Department', [['', '—'], ...departments.map((d) => [d.id, d.name] as [string, string])])}
-                {selectField('designation_id', 'Designation', [['', '—'], ...designations.map((d) => [d.id, d.name] as [string, string])])}
-                {selectField('branch_id', 'Branch / showroom', [['', '—'], ...branchList.map((b) => [b.id, b.name] as [string, string])])}
-              </div>
-            </fieldset>
+            <form onSubmit={submit} className="space-y-4 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Employee Code *</label>
+                  <Input
+                    value={form.emp_code}
+                    onChange={(e) => setField('emp_code', e.target.value)}
+                    required
+                    placeholder="e.g. EMP-101"
+                  />
+                </div>
 
-            <fieldset className="hr-fieldset">
-              <legend>Statutory &amp; bank</legend>
-              <div className="hr-form-grid">
-                {textField('pan', 'PAN')}
-                {textField('bank_account', 'Bank account')}
-                {textField('bank_ifsc', 'IFSC')}
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Full Name *</label>
+                  <Input
+                    value={form.full_name}
+                    onChange={(e) => setField('full_name', e.target.value)}
+                    required
+                    placeholder="e.g. Priya Natarajan"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Phone</label>
+                  <Input
+                    value={form.phone}
+                    onChange={(e) => setField('phone', e.target.value)}
+                    placeholder="+91 98765 43210"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Email</label>
+                  <Input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setField('email', e.target.value)}
+                    placeholder="priya@company.com"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Department</label>
+                  <select
+                    value={form.department_id}
+                    onChange={(e) => setField('department_id', e.target.value)}
+                    className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="">Select Department…</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Designation / Role</label>
+                  <select
+                    value={form.designation_id}
+                    onChange={(e) => setField('designation_id', e.target.value)}
+                    className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="">Select Designation…</option>
+                    {designations.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Joining Date *</label>
+                  <Input
+                    type="date"
+                    value={form.joining_date}
+                    onChange={(e) => setField('joining_date', e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Employment Type</label>
+                  <select
+                    value={form.employment_type}
+                    onChange={(e) => setField('employment_type', e.target.value)}
+                    className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    {EMPLOYMENT_TYPES.map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">PAN Card</label>
+                  <Input
+                    value={form.pan}
+                    onChange={(e) => setField('pan', e.target.value.toUpperCase())}
+                    placeholder="e.g. ABCDE1234F"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Bank Account Number</label>
+                  <Input
+                    value={form.bank_account}
+                    onChange={(e) => setField('bank_account', e.target.value)}
+                    placeholder="Account number"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Bank IFSC Code</label>
+                  <Input
+                    value={form.bank_ifsc}
+                    onChange={(e) => setField('bank_ifsc', e.target.value.toUpperCase())}
+                    placeholder="e.g. HDFC0001234"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">Employment Status</label>
+                  <select
+                    value={form.status}
+                    onChange={(e) => setField('status', e.target.value)}
+                    className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="active">Active</option>
+                    <option value="notice">On Notice</option>
+                    <option value="exited">Exited</option>
+                  </select>
+                </div>
               </div>
-            </fieldset>
-          </form>
-        </Modal>
+
+              <DialogFooter>
+                <Button variant="outline" type="button" onClick={() => setShowForm(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  {editId ? 'Update Profile' : 'Save Employee'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       )}
     </HrShell>
   );

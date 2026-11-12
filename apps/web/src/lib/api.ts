@@ -1,7 +1,20 @@
 const BASE = import.meta.env.VITE_API_URL || '/api';
 
-export function token() { return localStorage.getItem('gs_token') || ''; }
-export function setToken(t: string) { t ? localStorage.setItem('gs_token', t) : localStorage.removeItem('gs_token'); }
+const TOKEN_KEY = 'erp_token';
+const LEGACY_TOKEN_KEY = 'gs_token';
+
+export function token() {
+  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY) || '';
+}
+export function setToken(t: string) {
+  if (t) {
+    localStorage.setItem(TOKEN_KEY, t);
+    localStorage.removeItem(LEGACY_TOKEN_KEY); // migrate sessions from the old key
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+  }
+}
 
 async function req(path: string, opts: RequestInit = {}) {
   const res = await fetch(BASE + path, {

@@ -19,5 +19,5 @@ RequestHeader set Host "demo.marvelslice.com"
 RewriteCond %{REQUEST_URI} !^/\.well-known [NC]
 
 # [P] = proxy (NOT [R], which would redirect the browser to the visitor's own
-# 127.0.0.1). Target = the goldshop-web container published by docker-compose.
+# 127.0.0.1). Target = the erp-web container published by docker-compose.
 RewriteRule ^(.*)$ http://127.0.0.1:8083/$1 [P,L]

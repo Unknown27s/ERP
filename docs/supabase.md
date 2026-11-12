@@ -1,7 +1,7 @@
 # Supabase (Postgres) setup — 5 minutes
 
-The backend talks to **Supabase Postgres** whenever `DATABASE_URL` is set.
-No code or pricing changes are needed — same schema, same queries, same math.
+The backend is Postgres-only and talks to Supabase (or any Postgres 14+) when
+`DATABASE_URL` is set.
 
 ## 1. Create the project
 1. Go to https://supabase.com → New project.
@@ -9,48 +9,65 @@ No code or pricing changes are needed — same schema, same queries, same math.
 
 ## 2. Get the connection string
 Project Settings → Database → Connection string → **URI**.
-It looks like:
+
 ```
 postgresql://postgres:<db-password>@db.<project-ref>.supabase.co:5432/postgres
 ```
-Use the **direct connection** (port 5432) if your machine has IPv6. On an
+
+Use the **direct connection** only if your machine/host has IPv6. On an
 IPv4-only host the direct `db.<ref>.supabase.co` host is unreachable
 (`connect ENETUNREACH`) — use the **Session pooler** on port 5432 instead, with
 username `postgres.<project-ref>` and host `aws-0-<region>.pooler.supabase.com`.
-Both work for migrate/seed; the pooler is the IPv4-safe choice.
+The pooler is the IPv4-safe choice for migrate/seed and the running API.
 
-## 3. Create the tables (pick one)
-- **Option A — SQL Editor (easiest):** open Supabase SQL Editor, paste the full
-  contents of `supabase/migrations/0001_init_pg.sql`, Run. Idempotent — safe to re-run.
-- **Option B — CLI:**
-  ```bash
-  cd gold-shop-platform/server
-  DATABASE_URL="postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres" npm run migrate
-  ```
+## 3. Create the schema
+**Option A — CLI (recommended).** Applies every migration in order and records
+them in `schema_migrations`:
 
-## 4. Seed demo data (same catalogue, rates, users, offers as local)
 ```bash
-DATABASE_URL="postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres" npm run seed
+cd marvel-software
+set DATABASE_URL=postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres
+npm run migrate
 ```
-Logins: `owner@shop.local / Owner@123`, `manager / Manager@123`,
-`inventory / Inventory@123`, `billing / Billing@123`. Change these in production.
+
+**Option B — SQL Editor.** Paste each file from `supabase/migrations/` in
+filename order (`0001_init_pg.sql`, `0002_roles_staff_pg.sql`, …,
+`0009_holiday_soft_delete_pg.sql`) and run them. They are idempotent.
+
+The API also applies pending migrations on boot (`initDb`), so a fresh deploy
+self-heals as long as the connection string is valid.
+
+## 4. Seed demo data
+```bash
+npm run seed
+```
+
+This creates the company (default **MarvelSoftware**), the role catalogue and one
+login per role. Override the initial name with `COMPANY_NAME` / 
+`COMPANY_LEGAL_NAME` in `.env` before seeding.
+
+Demo logins: `admin@marvelsoftware.local / Admin@123`, `manager@marvelsoftware.local / Manager@123`,
+`hr@marvelsoftware.local / Hr@12345`, `finance@marvelsoftware.local / Finance@123`,
+`store@marvelsoftware.local / Store@123`, `sales@marvelsoftware.local / Sales@123`,
+`employee@marvelsoftware.local / Employee@123`. Change them in production.
 
 ## 5. Point the server at Supabase
 ```bash
-# server/.env  (or environment variables on your host)
-DATABASE_URL="postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres"
+# .env at the repository root
+DATABASE_URL="postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres"
 JWT_SECRET="<32+ random chars>"
 PORT=4000
 ```
 ```bash
-npm run dev -w server   # logs: db: Supabase Postgres
+npm run dev -w server
 ```
-`/api/health` reports `"db": "supabase-postgres"` when connected.
+`GET /api/health` returns `{"ok":true,"db":"postgres",...}`.
 
 ## Notes
-- `DATABASE_URL` is required — the server is Postgres-only (no SQLite fallback).
-- The backend connects with the **service/database role** string, so it bypasses
-  RLS — keep the connection string server-side only, never in the web app.
-  If you later enable RLS on these tables, add policies for the service role.
-- `packages/pricing` is untouched: the same paise-integer engine prices every
-  estimate and finalized invoice.
+- `DATABASE_URL` is required — there is no SQLite fallback.
+- The backend connects with the database/service role, so it bypasses RLS. Keep
+  the connection string server-side only; never expose it to the web app.
+- Business records are deactivated, not deleted. Take a `pg_dump` before any
+  manual cleanup.
+- The inherited `packages/pricing` engine is retained for the legacy routes but
+  is not used by the Phase 1 screens.

@@ -46,19 +46,19 @@ export function downloadPayslipPdf(p: PayslipData) {
   const margin = 14;
   let y = margin;
 
-  doc.setFillColor(71, 16, 29);
+  doc.setFillColor(11, 15, 25);
   doc.rect(margin, y, pageWidth - margin * 2, 22, 'F');
-  doc.setTextColor(255, 249, 242);
+  doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(15);
   doc.text((p.shop_name || 'PAYSLIP').toUpperCase(), margin + 6, y + 9);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setTextColor(220, 205, 185);
+  doc.setTextColor(203, 213, 225);
   doc.text(`Payslip for ${monthName(p.period)}`, margin + 6, y + 16);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.setTextColor(214, 180, 92);
+  doc.setTextColor(96, 165, 250);
   doc.text('SALARY SLIP', pageWidth - margin - 6, y + 10, { align: 'right' });
   y += 30;
 
@@ -135,22 +135,22 @@ export function downloadPayslipPdf(p: PayslipData) {
   doc.line(col1 + 90, tableTop, col1 + 90, y + rows * 6.5 + 1);
   y += rows * 6.5 + 3;
 
-  doc.setFillColor(249, 244, 238);
+  doc.setFillColor(241, 245, 249);
   doc.rect(col1, y, 182, 10, 'F');
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(71, 16, 29);
+  doc.setTextColor(15, 23, 42);
   doc.text('GROSS', col1 + 3, y + 6.5);
   doc.text(money(p.gross_inr), col1 + 82, y + 6.5, { align: 'right' });
   doc.text('TOTAL DEDUCTIONS', col2 + 3, y + 6.5);
   doc.text(money(p.total_deductions_inr), col2 + 64, y + 6.5, { align: 'right' });
   y += 16;
 
-  doc.setFillColor(71, 16, 29);
+  doc.setFillColor(15, 23, 42);
   doc.rect(col1, y, 182, 12, 'F');
-  doc.setTextColor(255, 249, 242);
+  doc.setTextColor(255, 255, 255);
   doc.setFontSize(11);
   doc.text('NET PAY', col1 + 4, y + 7.8);
-  doc.setTextColor(214, 180, 92);
+  doc.setTextColor(52, 211, 153);
   doc.text(money(p.net_inr), col1 + 178, y + 7.8, { align: 'right' });
 
   doc.setTextColor(140, 130, 125);

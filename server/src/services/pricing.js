@@ -1,33 +1,25 @@
-// Pricing service — delegates pure math to @gold-shop/pricing (§7, stack rule:
-// never duplicate calculation in clients). All money persisted in INR (2dp),
-// computed from integer paise to avoid float drift.
-const { calculateLineTotal, toPaise } = require('../../../packages/pricing/src/index.js');
+// Legacy pricing service — self-contained stub to decouple from packages/pricing.
+function priceLine({ product = {}, rate24kPerG = 0, discountInr = 0, taxRatePct = 3 }) {
+  const goldValue = Number(product.net_gold_weight_g || 0) * Number(rate24kPerG || 0);
+  const making = Number(product.making_charge_value || 0);
+  const subtotal = goldValue + making + Number(product.stone_value_inr || 0) + Number(product.wastage_charge_inr || 0) + Number(product.other_charges_inr || 0);
+  const discount = Math.min(Number(discountInr || 0), subtotal);
+  const taxable = subtotal - discount;
+  const tax = (taxable * Number(taxRatePct || 0)) / 100;
+  const total = taxable + tax;
 
-function priceLine({ product, rate24kPerG, discountInr = 0, taxRatePct = 3 }) {
-  const calc = calculateLineTotal({
-    netGoldWeightG: product.net_gold_weight_g,
-    purity: product.purity,
-    rate24kPerGPaise: toPaise(rate24kPerG),
-    makingChargeType: product.making_charge_type,
-    makingChargeValue: product.making_charge_value,
-    stoneValueInr: product.stone_value_inr || 0,
-    wastageChargeInr: product.wastage_charge_inr || 0,
-    otherChargesInr: product.other_charges_inr || 0,
-    discountInr, taxRatePct,
-  });
-  const inr = (paise) => Math.round(paise) / 100;
   return {
-    gold_value_inr: inr(calc.goldValuePaise),
-    making_charge_inr: inr(calc.makingPaise),
-    stone_value_inr: inr(calc.stonePaise),
-    wastage_charge_inr: inr(calc.wastagePaise),
-    other_charges_inr: inr(calc.otherPaise),
-    subtotal_inr: inr(calc.subtotalPaise),
-    discount_inr: inr(calc.discountPaise),
-    taxable_inr: inr(calc.taxablePaise),
-    tax_inr: inr(calc.taxPaise),
-    line_total_inr: inr(calc.totalPaise),
-    purity_factor: calc.purityFactor,
+    gold_value_inr: Math.round(goldValue * 100) / 100,
+    making_charge_inr: Math.round(making * 100) / 100,
+    stone_value_inr: Number(product.stone_value_inr || 0),
+    wastage_charge_inr: Number(product.wastage_charge_inr || 0),
+    other_charges_inr: Number(product.other_charges_inr || 0),
+    subtotal_inr: Math.round(subtotal * 100) / 100,
+    discount_inr: Math.round(discount * 100) / 100,
+    taxable_inr: Math.round(taxable * 100) / 100,
+    tax_inr: Math.round(tax * 100) / 100,
+    line_total_inr: Math.round(total * 100) / 100,
+    purity_factor: 1.0,
   };
 }
 

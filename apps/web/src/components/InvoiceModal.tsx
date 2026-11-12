@@ -86,7 +86,7 @@ export default function InvoiceModal({ saleId, initialSale, onClose }: Props) {
             {sale && <span className="badge ok">Finalized &amp; Paid</span>}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn gold" onClick={handleDownload} disabled={!sale}>
+            <button className="btn primary" onClick={handleDownload} disabled={!sale}>
               📥 Download Invoice PDF
             </button>
             <button className="btn ghost" onClick={handlePrint} disabled={!sale}>
@@ -123,14 +123,14 @@ export default function InvoiceModal({ saleId, initialSale, onClose }: Props) {
               }}
             >
               <div>
-                <h2 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)', color: 'var(--color-gold-deep)', letterSpacing: 0.5 }}>
-                  {sale.shop_name || 'AURUM LUXE JEWELLERS'}
+                <h2 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)', color: 'var(--color-ink)', letterSpacing: 0.5 }}>
+                  {sale.shop_name || 'ENTERPRISE ERP'}
                 </h2>
-                <div style={{ fontSize: 13, color: 'var(--color-muted)' }}>Certified BIS Hallmarked 916 Gold &amp; Fine Jewellery</div>
-                <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2 }}>GSTIN: 29ABCDE1234F1Z5 • BIS Lic: HM-916024</div>
+                <div style={{ fontSize: 13, color: 'var(--color-muted)' }}>Tax Invoice &amp; Goods Receipt</div>
+                <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2 }}>GSTIN: 29ABCDE1234F1Z5 • Registered Commercial Entity</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: 'var(--color-gold-deep)' }}>TAX INVOICE</div>
+                <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: 0.5, color: 'var(--color-ink)' }}>TAX INVOICE</div>
                 <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{sale.invoice_no}</div>
                 <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2 }}>
                   Date: {new Date(sale.sold_at || sale.created_at || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -233,13 +233,13 @@ export default function InvoiceModal({ saleId, initialSale, onClose }: Props) {
               </div>
             </div>
 
-            {/* Footer / BIS Hallmarking */}
+            {/* Footer / Terms */}
             <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: 14, fontSize: 12, color: 'var(--color-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
               <div>
-                <strong>Guarantee &amp; Purity Certification:</strong>
-                <div>• All gold jewellery is BIS hallmarked for verified fineness and purity.</div>
-                <div>• Certified weight documented at the time of purchase.</div>
-                <div>• Retain this invoice for exchange/buyback per store policies.</div>
+                <strong>Terms &amp; Certification:</strong>
+                <div>• Computer generated tax invoice valid under applicable commercial regulations.</div>
+                <div>• All items and taxes verified at the time of transaction.</div>
+                <div>• Retain this invoice for warranty and service records.</div>
               </div>
               <div style={{ textAlign: 'center', minWidth: 160 }}>
                 <div style={{ height: 36, borderBottom: '1px solid var(--color-espresso)', marginBottom: 4 }} />

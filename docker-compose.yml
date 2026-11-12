@@ -1,30 +1,31 @@
-# Demo deployment for the Gold Shop platform.
+# Deployment for the MarvelSoftware platform.
 #
 # Topology (Option B — dedicated port; see deploy/apache/subdomain-vhost.conf):
-#   Internet -> Apache / Webuzo (demo.marvelslice.com, TLS on 80/443)
+#   Internet -> Apache / Webuzo (TLS on 80/443)
 #             -> 127.0.0.1:8083
-#                -> goldshop-web (nginx: SPA + /api proxy)
-#                   -> goldshop-api :4000 -> Supabase Cloud (managed Postgres)
+#                -> erp-web (nginx: SPA + /api proxy)
+#                   -> erp-api :4000 -> Supabase Cloud (managed Postgres)
 #
-# Service names are prefixed (goldshop-*) so this stack can also join a shared
-# network (e.g. lms-network) without clashing with web/api/postgres/redis there.
+# Service names are prefixed (erp-*) so this stack can also join a shared
+# network without clashing with web/api/postgres/redis there.
 #
 # Usage:
 #   cp .env.example .env      # DATABASE_URL, JWT_SECRET, SMTP_* …
 #   docker compose up -d --build
-#   docker compose logs -f goldshop-api
+#   docker compose logs -f erp-api
 
 services:
-  goldshop-api:
+  erp-api:
     build:
       context: .
       dockerfile: server/Dockerfile
-    image: gold-shop/api:latest
+    image: marvel-software/api:latest
     env_file:
       - .env
     environment:
       NODE_ENV: production
       PORT: "4000"
+      TZ: ${APP_TIMEZONE:-Asia/Kolkata}
     expose:
       - "4000"
     # DATABASE_URL points at Supabase Cloud (managed Postgres) over the public
@@ -34,13 +35,13 @@ services:
     networks:
       - app
 
-  goldshop-web:
+  erp-web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    image: gold-shop/web:latest
+    image: marvel-software/web:latest
     depends_on:
-      goldshop-api:
+      erp-api:
         condition: service_healthy
     ports:
       # Loopback only. 8083 = first free port after your existing 8080/8081/8082.

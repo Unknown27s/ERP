@@ -1,6 +1,7 @@
 const express = require('express');
 const { get, all, run, nowFn, dayExpr, uid } = require('../db');
-const { auth, requireRoles, audit } = require('../middleware/auth');
+const { auth, requirePermission, audit } = require('../middleware/auth');
+const { hasPermission } = require('../services/rbac');
 const { normalizePhone, isValidPhone } = require('../services/phone');
 const campaignSvc = require('../services/campaigns');
 
@@ -8,14 +9,14 @@ const router = express.Router();
 router.use(auth);
 
 // ---- Customers (§5.4): normalized phone is the search key, customer_id the permanent ID ----
-async function customerSummary(c) {
+async function customerSummary(c, shopId) {
   const s = await get(`SELECT COUNT(*) n, COALESCE(SUM(total_inr),0) t, MAX(sold_at) last_at FROM sales
-    WHERE customer_id = ? AND status = 'finalized'`, c.id);
+    WHERE customer_id = ? AND shop_id = ? AND status = 'finalized'`, c.id, shopId);
   return { bill_count: s.n, total_spent_inr: s.t, last_purchase_at: s.last_at };
 }
 
 // Phone-first lookup: returns all matching profiles (shared numbers resolved by staff, never auto-merged)
-router.get('/customers/phone/:phone', async (req, res) => {
+router.get('/customers/phone/:phone', requirePermission('crm.view'), async (req, res) => {
   const norm = normalizePhone(req.params.phone);
   if (!norm) return res.status(400).json({ error: 'bad_request', message: 'valid phone number required' });
   const matches = await all('SELECT * FROM customers WHERE shop_id = ? AND (normalized_phone = ? OR phone = ?)',
@@ -23,13 +24,13 @@ router.get('/customers/phone/:phone', async (req, res) => {
   const data = [];
   for (const m of matches) {
     const purchases = await all(`SELECT s.* FROM sales s WHERE s.customer_id = ? AND s.status = 'finalized' ORDER BY s.sold_at DESC LIMIT 20`, m.id);
-    data.push({ ...m, summary: await customerSummary(m), purchases });
+    data.push({ ...m, summary: await customerSummary(m, req.user.shop_id), purchases });
   }
   res.json({ data, normalized: norm });
 });
 
 // ---- Customers (§5.4) ----
-router.get('/customers', async (req, res) => {
+router.get('/customers', requirePermission('crm.view'), async (req, res) => {
   const { q, occasion, category, min_spent, max_spent, from, to, page = 1, limit = 20,
     last_days, lapsed_days, repeat, last_from, last_to } = req.query;
   const conds = ['c.shop_id = ?']; const args = [req.user.shop_id];
@@ -76,7 +77,7 @@ router.get('/customers', async (req, res) => {
 // Customers must always have a name, phone and a complete postal address.
 const CUSTOMER_REQUIRED = ['name', 'phone', 'address_line1', 'city', 'state', 'postal_code'];
 
-router.post('/customers', async (req, res) => {
+router.post('/customers', requirePermission('crm.manage'), async (req, res) => {
   const b = req.body || {};
   const missing = CUSTOMER_REQUIRED.filter((k) => !String(b[k] ?? '').trim());
   if (missing.length) return res.status(400).json({ error: 'bad_request', message: `Missing required fields: ${missing.join(', ')}`, fields: missing });
@@ -91,20 +92,20 @@ router.post('/customers', async (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, req.user.shop_id, code, b.name, b.phone, norm, b.email || null, b.address_line1 || null,
     b.city || null, b.state || null, b.postal_code || null, b.birthday || null, b.anniversary || null, b.notes || null,
     b.preferred_channel || 'both', b.marketing_consent ? 1 : 0);
-  audit(req.user.user_id, 'customer.create', 'customer', id, `${code} ${b.name}`);
+  await audit(req.user.user_id, 'customer.create', 'customer', id, `${code} ${b.name}`);
   res.status(201).json({ data: await get('SELECT * FROM customers WHERE id=?', id) });
 });
-router.get('/customers/:id', async (req, res) => {
-  const c = await get('SELECT * FROM customers WHERE id=?', req.params.id);
+router.get('/customers/:id', requirePermission('crm.view'), async (req, res) => {
+  const c = await get('SELECT * FROM customers WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
   if (!c) return res.status(404).json({ error: 'not_found' });
-  const purchases = await all(`SELECT s.* FROM sales s WHERE s.customer_id=? AND s.status='finalized' ORDER BY s.sold_at DESC LIMIT 50`, c.id);
+  const purchases = await all(`SELECT s.* FROM sales s WHERE s.customer_id=? AND s.shop_id=? AND s.status='finalized' ORDER BY s.sold_at DESC LIMIT 50`, c.id, req.user.shop_id);
   const occasions = await all('SELECT * FROM customer_occasions WHERE customer_id=?', c.id);
   const addresses = await all('SELECT * FROM customer_addresses WHERE customer_id=?', c.id);
   const consent = await all('SELECT * FROM consent_events WHERE customer_id=? ORDER BY created_at DESC', c.id);
   res.json({ data: { ...c, purchases, occasions, addresses, consent } });
 });
-router.patch('/customers/:id', async (req, res) => {
-  const cur = await get('SELECT * FROM customers WHERE id=?', req.params.id);
+router.patch('/customers/:id', requirePermission('crm.manage'), async (req, res) => {
+  const cur = await get('SELECT * FROM customers WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
   if (!cur) return res.status(404).json({ error: 'not_found' });
   const b = req.body || {};
   const allowed = ['name', 'phone', 'email', 'address_line1', 'city', 'state', 'postal_code', 'birthday', 'anniversary', 'notes', 'preferred_channel'];
@@ -126,24 +127,26 @@ router.patch('/customers/:id', async (req, res) => {
     await run('INSERT INTO consent_events (id, customer_id, channel, purpose, status, source) VALUES (?,?,?,?,?,?)',
       uid('con'), cur.id, cur.preferred_channel, 'marketing', b.marketing_consent ? 'granted' : 'revoked', 'crm-update');
   }
-  if (sets.length) { args.push(cur.id); await run(`UPDATE customers SET ${sets.join(', ')} WHERE id=?`, ...args); }
-  audit(req.user.user_id, 'customer.update', 'customer', cur.id, 'profile update');
-  res.json({ data: await get('SELECT * FROM customers WHERE id=?', cur.id) });
+  if (sets.length) { args.push(cur.id, req.user.shop_id); await run(`UPDATE customers SET ${sets.join(', ')} WHERE id=? AND shop_id=?`, ...args); }
+  await audit(req.user.user_id, 'customer.update', 'customer', cur.id, 'profile update');
+  res.json({ data: await get('SELECT * FROM customers WHERE id=? AND shop_id=?', cur.id, req.user.shop_id) });
 });
-router.post('/customers/:id/occasions', async (req, res) => {
+router.post('/customers/:id/occasions', requirePermission('crm.manage'), async (req, res) => {
   const { occasion_type, occasion_date, notes } = req.body || {};
   if (!occasion_type || !occasion_date) return res.status(400).json({ error: 'bad_request' });
+  const customer = await get('SELECT id FROM customers WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
+  if (!customer) return res.status(404).json({ error: 'not_found' });
   const id = uid('occ');
   await run('INSERT INTO customer_occasions (id, customer_id, occasion_type, occasion_date, notes) VALUES (?,?,?,?,?)',
-    id, req.params.id, occasion_type, occasion_date, notes || null);
+    id, customer.id, occasion_type, occasion_date, notes || null);
   res.status(201).json({ data: await get('SELECT * FROM customer_occasions WHERE id=?', id) });
 });
 
 // ---- Offers & Campaigns (§5.7, consent-safe, idempotent) ----
-router.get('/offers', async (req, res) => {
+router.get('/offers', requirePermission('crm.view'), async (req, res) => {
   res.json({ data: await all('SELECT * FROM offers WHERE shop_id=? ORDER BY created_at DESC', req.user.shop_id) });
 });
-router.post('/offers', requireRoles('admin'), async (req, res) => {
+router.post('/offers', requirePermission('crm.manage'), async (req, res) => {
   const b = req.body || {};
   if (!b.code) return res.status(400).json({ error: 'bad_request', message: 'code required' });
   const id = uid('off');
@@ -153,13 +156,13 @@ router.post('/offers', requireRoles('admin'), async (req, res) => {
       b.discount_value || 0, b.min_purchase_inr || 0, b.max_discount_inr || null,
       JSON.stringify(b.eligible_categories || []), b.valid_from || null, b.valid_to || null, b.redemption_limit || null);
   } catch { return res.status(409).json({ error: 'conflict', message: 'Offer code exists' }); }
-  audit(req.user.user_id, 'offer.create', 'offer', id, b.code);
+  await audit(req.user.user_id, 'offer.create', 'offer', id, b.code);
   res.status(201).json({ data: await get('SELECT * FROM offers WHERE id=?', id) });
 });
-router.get('/campaigns', requireRoles('admin'), async (req, res) => {
+router.get('/campaigns', requirePermission('crm.view'), async (req, res) => {
   res.json({ data: await all('SELECT * FROM campaigns WHERE shop_id=? ORDER BY created_at DESC', req.user.shop_id) });
 });
-router.post('/campaigns', requireRoles('admin'), async (req, res) => {
+router.post('/campaigns', requirePermission('crm.manage'), async (req, res) => {
   const { name, channel = 'whatsapp', mode = 'manual', trigger_type, template, offer_code, schedule_at, audience = {} } = req.body || {};
   if (!name || !template) return res.status(400).json({ error: 'bad_request', message: 'name + template required' });
   const id = uid('cam');
@@ -179,10 +182,10 @@ router.post('/campaigns', requireRoles('admin'), async (req, res) => {
       queued++;
     } catch { /* duplicate suppressed */ }
   }
-  audit(req.user.user_id, 'campaign.create', 'campaign', id, `${name} → ${queued} opted-in recipients`);
+  await audit(req.user.user_id, 'campaign.create', 'campaign', id, `${name} → ${queued} opted-in recipients`);
   res.status(201).json({ data: { ...(await get('SELECT * FROM campaigns WHERE id=?', id)), queued } });
 });
-router.patch('/campaigns/:id', requireRoles('admin'), async (req, res) => {
+router.patch('/campaigns/:id', requirePermission('crm.manage'), async (req, res) => {
   const cam = await get('SELECT * FROM campaigns WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
   if (!cam) return res.status(404).json({ error: 'not_found' });
   if (cam.sent_at) return res.status(409).json({ error: 'already_sent', message: 'A sent campaign can no longer be edited' });
@@ -193,31 +196,33 @@ router.patch('/campaigns/:id', requireRoles('admin'), async (req, res) => {
     pick(name, cam.name), pick(channel, cam.channel), pick(mode, cam.mode), pick(trigger_type, cam.trigger_type),
     pick(template, cam.template), pick(offer_code, cam.offer_code), pick(schedule_at, cam.schedule_at),
     approval, cam.id, req.user.shop_id);
-  audit(req.user.user_id, 'campaign.update', 'campaign', cam.id, String(name ?? cam.name));
+  await audit(req.user.user_id, 'campaign.update', 'campaign', cam.id, String(name ?? cam.name));
   res.json({ data: await get('SELECT * FROM campaigns WHERE id=?', cam.id) });
 });
-router.post('/campaigns/:id/approve', requireRoles('admin'), async (req, res) => {
-  await run(`UPDATE campaigns SET approval_status='approved' WHERE id=?`, req.params.id);
-  audit(req.user.user_id, 'campaign.approve', 'campaign', req.params.id, 'approved');
-  res.json({ data: await get('SELECT * FROM campaigns WHERE id=?', req.params.id) });
+router.post('/campaigns/:id/approve', requirePermission('crm.manage'), async (req, res) => {
+  const cam = await get('SELECT * FROM campaigns WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
+  if (!cam) return res.status(404).json({ error: 'not_found' });
+  await run(`UPDATE campaigns SET approval_status='approved' WHERE id=? AND shop_id=?`, cam.id, req.user.shop_id);
+  await audit(req.user.user_id, 'campaign.approve', 'campaign', cam.id, 'approved');
+  res.json({ data: await get('SELECT * FROM campaigns WHERE id=? AND shop_id=?', cam.id, req.user.shop_id) });
 });
 // Approved-but-unsent campaigns due to be sent — drives the login prompt.
-router.get('/campaigns/reminders', requireRoles('admin'), async (req, res) => {
+router.get('/campaigns/reminders', requirePermission('crm.view'), async (req, res) => {
   res.json({ data: await campaignSvc.listReminders(req.user.shop_id) });
 });
-router.post('/campaigns/:id/send', requireRoles('admin'), async (req, res) => {
+router.post('/campaigns/:id/send', requirePermission('crm.manage'), async (req, res) => {
   try {
-    res.json({ data: await campaignSvc.sendCampaign(req.params.id, { actorId: req.user.user_id }) });
+    res.json({ data: await campaignSvc.sendCampaign(req.params.id, { actorId: req.user.user_id, shopId: req.user.shop_id }) });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.code || 'error', message: e.message });
   }
 });
 // Snooze the login prompt ("Remind later").
-router.post('/campaigns/:id/remind', requireRoles('admin'), async (req, res) => {
+router.post('/campaigns/:id/remind', requirePermission('crm.manage'), async (req, res) => {
   const hours = Number(req.body?.hours) || 24;
   const data = await campaignSvc.snoozeCampaign(req.params.id, req.user.shop_id, hours);
   if (!data) return res.status(404).json({ error: 'not_found' });
-  audit(req.user.user_id, 'campaign.remind', 'campaign', req.params.id, `snoozed ${hours}h`);
+  await audit(req.user.user_id, 'campaign.remind', 'campaign', req.params.id, `snoozed ${hours}h`);
   res.json({ data });
 });
 router.post('/webhooks/messaging-provider', async (req, res) => {
@@ -241,7 +246,7 @@ function range(req) {
   else { s = new Date(now.getTime() - 30 * 864e5).toISOString(); }
   return { s, e };
 }
-router.get('/reports/sales', requireRoles('admin'), async (req, res) => {
+router.get('/reports/sales', requirePermission('reports.view'), async (req, res) => {
   const { s, e } = range(req);
   const rows = await all(`SELECT * FROM sales WHERE shop_id=? AND sold_at>=? AND sold_at<=? AND status='finalized'`, req.user.shop_id, s, e);
   const revenue = rows.reduce((a, r) => a + r.total_inr, 0);
@@ -257,18 +262,21 @@ router.get('/reports/sales', requireRoles('admin'), async (req, res) => {
   const byPay = await all(`SELECT py.method, SUM(py.amount_inr) total FROM payments py JOIN sales s ON s.id=py.sale_id
     WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized' GROUP BY py.method`, req.user.shop_id, s, e);
   let cogs = 0;
-  if (req.user.role === 'owner' || req.user.role === 'manager') {
+  // Cost and margin are finance data, not general report data. A Sales/Store
+  // user may hold reports.view without finance.view.
+  const canSeeCost = hasPermission(req.user.permissions, 'finance.view');
+  if (canSeeCost) {
     cogs = (await get(`SELECT COALESCE(SUM(p.acquisition_cost_inr),0) c FROM sale_items si JOIN sales s ON s.id=si.sale_id
       JOIN products p ON p.id=si.product_id WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized'`, req.user.shop_id, s, e)).c;
   }
   res.json({ data: {
     from: s, to: e, revenue, bill_count: bills, unique_customers: custIds.size,
     avg_bill: bills ? revenue / bills : 0, items_sold: items.n, gold_weight_g: items.w,
-    gross_profit_estimate: req.user.role === 'inventory' || req.user.role === 'billing' ? null : revenue - cogs,
+    gross_profit_estimate: canSeeCost ? revenue - cogs : null,
     byDay, byCat, byPay,
   } });
 });
-router.get('/reports/category-products', requireRoles('admin'), async (req, res) => {
+router.get('/reports/category-products', requirePermission('reports.view'), async (req, res) => {
   const { s, e } = range(req);
   const { category, q } = req.query;
   const conds = [`s.shop_id=?`, `s.sold_at>=?`, `s.sold_at<=?`, `s.status='finalized'`];
@@ -300,24 +308,49 @@ router.get('/reports/category-products', requireRoles('admin'), async (req, res)
     customers: new Set(rows.map((r) => r.customer_id).filter(Boolean)).size,
     last_sold_at: rows.length ? rows[0].sold_at : null,
   };
+  // Acquisition cost is cost data: only finance-capable roles receive it.
+  if (!hasPermission(req.user.permissions, 'finance.view')) {
+    for (const row of rows) delete row.acquisition_cost_inr;
+  }
   res.json({ data: rows, summary, category: category || null, from: s, to: e });
 });
-router.get('/reports/inventory', requireRoles('admin'), async (req, res) => {
+router.get('/reports/inventory', requirePermission('reports.view'), async (req, res) => {
   const byCat = await all(`SELECT c.name category, COUNT(*) pieces, SUM(p.net_gold_weight_g) weight_g, SUM(p.acquisition_cost_inr) acq_inr
     FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.shop_id=? AND p.status='available' GROUP BY c.name`, req.user.shop_id);
   const low = await all(`SELECT c.name category, COUNT(*) n FROM products p LEFT JOIN categories c ON c.id=p.category_id
     WHERE p.shop_id=? AND p.status='available' GROUP BY c.name HAVING COUNT(*) < 5`, req.user.shop_id);
+  if (!hasPermission(req.user.permissions, 'finance.view')) {
+    for (const row of byCat) delete row.acq_inr;
+  }
   res.json({ data: { byCat, low_stock: low } });
 });
-router.get('/reports/customers', requireRoles('admin'), async (req, res) => {
+router.get('/reports/customers', requirePermission('reports.view'), async (req, res) => {
   const { s, e } = range(req);
   const created = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=? AND created_at>=? AND created_at<=?`, req.user.shop_id, s, e)).n;
   const repeat = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=? AND purchase_count > 1`, req.user.shop_id)).n;
   const total = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=?`, req.user.shop_id)).n;
   res.json({ data: { new_customers: created, repeat_customers: repeat, total, repeat_rate: total ? repeat / total : 0 } });
 });
-router.get('/audit-logs', requireRoles('admin'), async (req, res) => {
-  res.json({ data: await all('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200') });
+router.get('/audit-logs', requirePermission('audit.view'), async (req, res) => {
+  const { q, action, from, to, limit = 200 } = req.query;
+  // `audit_logs` has no shop column, so scope through the actor's profile.
+  const conds = ['a.actor_id IN (SELECT user_id FROM profiles WHERE shop_id = ?)'];
+  const args = [req.user.shop_id];
+  if (action) { conds.push('a.action = ?'); args.push(String(action)); }
+  if (from) { conds.push('a.created_at >= ?'); args.push(String(from)); }
+  if (to) { conds.push('a.created_at <= ?'); args.push(`${String(to)}T23:59:59.999Z`); }
+  if (q) {
+    conds.push('(a.action LIKE ? OR a.entity_type LIKE ? OR a.summary LIKE ? OR a.actor_id LIKE ?)');
+    const like = `%${q}%`;
+    args.push(like, like, like, like);
+  }
+  const rows = await all(
+    `SELECT a.*, p.display_name AS actor_name, p.email AS actor_email
+     FROM audit_logs a LEFT JOIN profiles p ON p.user_id = a.actor_id
+     WHERE ${conds.join(' AND ')} ORDER BY a.created_at DESC LIMIT ?`,
+    ...args, Math.min(Number(limit) || 200, 500)
+  );
+  res.json({ data: rows });
 });
 
 module.exports = router;

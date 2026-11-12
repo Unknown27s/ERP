@@ -1,4 +1,10 @@
-# Implementation Log — Gold Jewellery Shop Management System
+# Implementation Log — Gold Jewellery Shop Management System (legacy)
+
+> **Historical document.** Sections 1–8 describe the inherited jewellery build.
+> The application has since been converted to a generic ERP under the
+> specification's phased plan. For the current state see `README.md` and
+> `ASSUMPTIONS.md`; Phase 0/1 added roles/permissions, company settings,
+> departments/designations and the audit trail (migration `0008_erp_foundation_pg.sql`).
 
 **Source requirements:** `Gold_Jewellery_Shop_Management_System_Documentation_v1_1_Design_System.docx` (v1.0, 14 Oct 2026)
 **Workspace:** `gold-shop-platform/` **Date:** 14 Oct 2026

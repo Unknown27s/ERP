@@ -1,9 +1,12 @@
 /**
- * HR management — Phase 1 (admin-only).
+ * HR management — Phase 1.
  *
  * Covers: employee records, departments/designations, holidays, attendance
  * (manual + biometric import), leave types/balances/requests, salary
  * structures, monthly payroll runs and payslips.
+ *
+ * Every route declares the permission it needs; the API is the enforcement
+ * point, the hidden menu is only a convenience.
  *
  * Dates are stored/sent as plain 'YYYY-MM-DD' strings so they never shift
  * across timezones. Money is stored as numeric INR amounts; calculations are
@@ -11,11 +14,11 @@
  */
 const express = require('express');
 const { get, all, run, withTransaction, uid } = require('../db');
-const { auth, requireRoles, audit } = require('../middleware/auth');
+const { auth, requirePermission, audit } = require('../middleware/auth');
+const { today } = require('../services/date');
 
 const router = express.Router();
 router.use(auth);
-router.use(requireRoles('admin'));
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PERIOD_RE = /^\d{4}-\d{2}$/;
@@ -27,8 +30,6 @@ const PAYROLL_STATUS = ['draft', 'locked', 'paid'];
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const today = () => isoDate(new Date());
 const isDate = (v) => typeof v === 'string' && DATE_RE.test(v);
 const isPeriod = (v) => typeof v === 'string' && PERIOD_RE.test(v);
 const daysInMonth = (period) => {
@@ -66,7 +67,7 @@ function bad(res, message) {
 }
 
 // ---------------------------------------------------------------- overview
-router.get('/overview', async (req, res) => {
+router.get('/overview', requirePermission('hr.view'), async (req, res) => {
   const shop = req.user.shop_id;
   const month = today().slice(0, 7);
   const [headcount] = await all(
@@ -92,62 +93,71 @@ router.get('/overview', async (req, res) => {
 });
 
 // ------------------------------------------------------- departments/roles
-router.get('/departments', async (req, res) => {
-  const rows = await all('SELECT * FROM departments WHERE shop_id = ? ORDER BY name', req.user.shop_id);
+router.get('/departments', requirePermission('hr.view'), async (req, res) => {
+  const rows = await all('SELECT * FROM departments WHERE shop_id = ? AND active = 1 ORDER BY name', req.user.shop_id);
   res.json({ data: rows });
 });
 
-router.post('/departments', async (req, res) => {
+router.post('/departments', requirePermission('hr.manage'), async (req, res) => {
   const name = String((req.body || {}).name || '').trim();
   if (!name) return bad(res, 'name required');
-  const exists = await get('SELECT id FROM departments WHERE shop_id = ? AND LOWER(name) = LOWER(?)', req.user.shop_id, name);
-  if (exists) return res.status(409).json({ error: 'conflict', message: 'Department already exists' });
+  const exists = await get('SELECT * FROM departments WHERE shop_id = ? AND LOWER(name) = LOWER(?)', req.user.shop_id, name);
+  if (exists) {
+    if (exists.active) return res.status(409).json({ error: 'conflict', message: 'Department already exists' });
+    await run('UPDATE departments SET active = 1 WHERE id = ?', exists.id);
+    await audit(req.user.user_id, 'hr.department.create', 'department', exists.id, `${name} (reactivated)`);
+    return res.status(201).json({ data: await get('SELECT * FROM departments WHERE id = ?', exists.id) });
+  }
   const id = uid('dept');
   await run('INSERT INTO departments (id, shop_id, name) VALUES (?,?,?)', id, req.user.shop_id, name);
-  audit(req.user.user_id, 'hr.department.create', 'department', id, name);
+  await audit(req.user.user_id, 'hr.department.create', 'department', id, name);
   res.status(201).json({ data: await get('SELECT * FROM departments WHERE id = ?', id) });
 });
 
-router.delete('/departments/:id', async (req, res) => {
+// DELETE keeps its HTTP verb for compatibility but deactivates the row: business
+// records are never hard-deleted (spec §"no destructive deletes").
+router.delete('/departments/:id', requirePermission('hr.manage'), async (req, res) => {
   const row = await get('SELECT * FROM departments WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!row) return res.status(404).json({ error: 'not_found' });
-  const used = await get('SELECT id FROM employees WHERE department_id = ? LIMIT 1', row.id);
-  if (used) return res.status(409).json({ error: 'conflict', message: 'Department is assigned to employees' });
-  await run('DELETE FROM departments WHERE id = ?', row.id);
-  audit(req.user.user_id, 'hr.department.delete', 'department', row.id, row.name);
-  res.json({ data: { deleted: true } });
+  await run('UPDATE departments SET active = 0 WHERE id = ?', row.id);
+  await audit(req.user.user_id, 'hr.department.deactivate', 'department', row.id, row.name);
+  res.json({ data: { deactivated: true } });
 });
 
-router.get('/designations', async (req, res) => {
-  const rows = await all('SELECT * FROM designations WHERE shop_id = ? ORDER BY name', req.user.shop_id);
+router.get('/designations', requirePermission('hr.view'), async (req, res) => {
+  const rows = await all('SELECT * FROM designations WHERE shop_id = ? AND active = 1 ORDER BY name', req.user.shop_id);
   res.json({ data: rows });
 });
 
-router.post('/designations', async (req, res) => {
+router.post('/designations', requirePermission('hr.manage'), async (req, res) => {
   const { name, grade } = req.body || {};
   const clean = String(name || '').trim();
   if (!clean) return bad(res, 'name required');
-  const exists = await get('SELECT id FROM designations WHERE shop_id = ? AND LOWER(name) = LOWER(?)', req.user.shop_id, clean);
-  if (exists) return res.status(409).json({ error: 'conflict', message: 'Designation already exists' });
+  const exists = await get('SELECT * FROM designations WHERE shop_id = ? AND LOWER(name) = LOWER(?)', req.user.shop_id, clean);
+  if (exists) {
+    if (exists.active) return res.status(409).json({ error: 'conflict', message: 'Designation already exists' });
+    await run('UPDATE designations SET active = 1, grade = ? WHERE id = ?',
+      grade ? String(grade).trim() : exists.grade, exists.id);
+    await audit(req.user.user_id, 'hr.designation.create', 'designation', exists.id, `${clean} (reactivated)`);
+    return res.status(201).json({ data: await get('SELECT * FROM designations WHERE id = ?', exists.id) });
+  }
   const id = uid('desig');
   await run('INSERT INTO designations (id, shop_id, name, grade) VALUES (?,?,?,?)',
     id, req.user.shop_id, clean, grade ? String(grade).trim() : null);
-  audit(req.user.user_id, 'hr.designation.create', 'designation', id, clean);
+  await audit(req.user.user_id, 'hr.designation.create', 'designation', id, clean);
   res.status(201).json({ data: await get('SELECT * FROM designations WHERE id = ?', id) });
 });
 
-router.delete('/designations/:id', async (req, res) => {
+router.delete('/designations/:id', requirePermission('hr.manage'), async (req, res) => {
   const row = await get('SELECT * FROM designations WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!row) return res.status(404).json({ error: 'not_found' });
-  const used = await get('SELECT id FROM employees WHERE designation_id = ? LIMIT 1', row.id);
-  if (used) return res.status(409).json({ error: 'conflict', message: 'Designation is assigned to employees' });
-  await run('DELETE FROM designations WHERE id = ?', row.id);
-  audit(req.user.user_id, 'hr.designation.delete', 'designation', row.id, row.name);
-  res.json({ data: { deleted: true } });
+  await run('UPDATE designations SET active = 0 WHERE id = ?', row.id);
+  await audit(req.user.user_id, 'hr.designation.deactivate', 'designation', row.id, row.name);
+  res.json({ data: { deactivated: true } });
 });
 
 // Read-only branch lookup for the employee form.
-router.get('/branches', async (req, res) => {
+router.get('/branches', requirePermission('hr.view'), async (req, res) => {
   const rows = await all('SELECT id, name, address FROM branches WHERE shop_id = ? AND active = 1 ORDER BY name', req.user.shop_id);
   res.json({ data: rows });
 });
@@ -159,7 +169,7 @@ const EMPLOYEE_COLS = [
   'joining_date', 'exit_date', 'status', 'bank_account', 'bank_ifsc', 'pan', 'user_id',
 ];
 
-router.get('/employees', async (req, res) => {
+router.get('/employees', requirePermission('hr.view'), async (req, res) => {
   const { q, status, department_id } = req.query;
   const conds = ['e.shop_id = ?'];
   const args = [req.user.shop_id];
@@ -183,7 +193,7 @@ router.get('/employees', async (req, res) => {
   res.json({ data: rows });
 });
 
-router.get('/employees/:id', async (req, res) => {
+router.get('/employees/:id', requirePermission('hr.view'), async (req, res) => {
   const row = await get(
     `SELECT e.*, d.name AS department_name, g.name AS designation_name, b.name AS branch_name,
             m.full_name AS manager_name
@@ -200,7 +210,7 @@ router.get('/employees/:id', async (req, res) => {
   res.json({ data: { ...row, salary_structures: salary } });
 });
 
-router.post('/employees', async (req, res) => {
+router.post('/employees', requirePermission('hr.manage'), async (req, res) => {
   const b = req.body || {};
   const empCode = String(b.emp_code || '').trim();
   const fullName = String(b.full_name || '').trim();
@@ -229,11 +239,11 @@ router.post('/employees', async (req, res) => {
     b.dob || null, b.gender || null, b.address || null, b.department_id || null, b.designation_id || null,
     b.branch_id || null, b.manager_id || null, b.employment_type || 'full_time', joiningDate,
     b.exit_date || null, b.status || 'active', b.bank_account || null, b.bank_ifsc || null, b.pan || null);
-  audit(req.user.user_id, 'hr.employee.create', 'employee', id, `${empCode} ${fullName}`);
+  await audit(req.user.user_id, 'hr.employee.create', 'employee', id, `${empCode} ${fullName}`);
   res.status(201).json({ data: await get('SELECT * FROM employees WHERE id = ?', id) });
 });
 
-router.patch('/employees/:id', async (req, res) => {
+router.patch('/employees/:id', requirePermission('hr.manage'), async (req, res) => {
   const cur = await findEmployee(req.user.shop_id, req.params.id);
   if (!cur) return res.status(404).json({ error: 'not_found' });
   const b = req.body || {};
@@ -269,21 +279,21 @@ router.patch('/employees/:id', async (req, res) => {
   sets.push('updated_at = now()');
   args.push(cur.id);
   await run(`UPDATE employees SET ${sets.join(', ')} WHERE id = ?`, ...args);
-  audit(req.user.user_id, 'hr.employee.update', 'employee', cur.id, `updated ${cur.emp_code}`);
+  await audit(req.user.user_id, 'hr.employee.update', 'employee', cur.id, `updated ${cur.emp_code}`);
   res.json({ data: await get('SELECT * FROM employees WHERE id = ?', cur.id) });
 });
 
 // ---------------------------------------------------------------- holidays
-router.get('/holidays', async (req, res) => {
+router.get('/holidays', requirePermission('leave.view'), async (req, res) => {
   const year = String(req.query.year || today().slice(0, 4));
   if (!/^\d{4}$/.test(year)) return bad(res, 'year must be YYYY');
   const rows = await all(
-    'SELECT * FROM holidays WHERE shop_id = ? AND holiday_date LIKE ? ORDER BY holiday_date',
+    'SELECT * FROM holidays WHERE shop_id = ? AND active = 1 AND holiday_date LIKE ? ORDER BY holiday_date',
     req.user.shop_id, `${year}-%`);
   res.json({ data: rows });
 });
 
-router.post('/holidays', async (req, res) => {
+router.post('/holidays', requirePermission('leave.manage'), async (req, res) => {
   const { holiday_date, name, holiday_type } = req.body || {};
   if (!isDate(holiday_date)) return bad(res, 'holiday_date must be YYYY-MM-DD');
   if (!String(name || '').trim()) return bad(res, 'name required');
@@ -292,20 +302,20 @@ router.post('/holidays', async (req, res) => {
   if (exists) return res.status(409).json({ error: 'conflict', message: 'A holiday already exists on that date' });
   await run('INSERT INTO holidays (id, shop_id, holiday_date, name, holiday_type) VALUES (?,?,?,?,?)',
     id, req.user.shop_id, holiday_date, String(name).trim(), holiday_type || 'public');
-  audit(req.user.user_id, 'hr.holiday.create', 'holiday', id, `${holiday_date} ${name}`);
+  await audit(req.user.user_id, 'hr.holiday.create', 'holiday', id, `${holiday_date} ${name}`);
   res.status(201).json({ data: await get('SELECT * FROM holidays WHERE id = ?', id) });
 });
 
-router.delete('/holidays/:id', async (req, res) => {
+router.delete('/holidays/:id', requirePermission('leave.manage'), async (req, res) => {
   const row = await get('SELECT * FROM holidays WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!row) return res.status(404).json({ error: 'not_found' });
-  await run('DELETE FROM holidays WHERE id = ?', row.id);
-  audit(req.user.user_id, 'hr.holiday.delete', 'holiday', row.id, `${row.holiday_date} ${row.name}`);
-  res.json({ data: { deleted: true } });
+  await run('UPDATE holidays SET active = 0 WHERE id = ?', row.id);
+  await audit(req.user.user_id, 'hr.holiday.deactivate', 'holiday', row.id, `${row.holiday_date} ${row.name}`);
+  res.json({ data: { deactivated: true } });
 });
 
 // -------------------------------------------------------------- attendance
-router.get('/attendance', async (req, res) => {
+router.get('/attendance', requirePermission('hr.view'), async (req, res) => {
   const { month, date, employee_id } = req.query;
   const conds = ['a.shop_id = ?'];
   const args = [req.user.shop_id];
@@ -363,10 +373,10 @@ async function upsertAttendance(shopId, body, actorId, source) {
   return { row, emp };
 }
 
-router.post('/attendance', async (req, res) => {
+router.post('/attendance', requirePermission('hr.manage'), async (req, res) => {
   try {
     const { row, emp } = await upsertAttendance(req.user.shop_id, req.body || {}, req.user.user_id, 'manual');
-    audit(req.user.user_id, 'hr.attendance.mark', 'attendance', row.id, `${emp.emp_code} ${row.work_date} ${row.status}`);
+    await audit(req.user.user_id, 'hr.attendance.mark', 'attendance', row.id, `${emp.emp_code} ${row.work_date} ${row.status}`);
     res.status(201).json({ data: row });
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: 'bad_request', message: e.message });
@@ -380,7 +390,7 @@ router.post('/attendance', async (req, res) => {
  *         check_in?, check_out?, status?, overtime_minutes? }] }
  * Unknown employee codes are reported, never silently dropped.
  */
-router.post('/attendance/import', async (req, res) => {
+router.post('/attendance/import', requirePermission('hr.manage'), async (req, res) => {
   const body = req.body || {};
   const rows = Array.isArray(body.rows) ? body.rows : [];
   if (!rows.length) return bad(res, 'rows[] required');
@@ -404,7 +414,7 @@ router.post('/attendance/import', async (req, res) => {
       errors.push({ row: i + 1, error: e.message });
     }
   }
-  audit(req.user.user_id, 'hr.attendance.import', 'attendance', null, `${source}: ${imported.length} imported, ${errors.length} failed`);
+  await audit(req.user.user_id, 'hr.attendance.import', 'attendance', null, `${source}: ${imported.length} imported, ${errors.length} failed`);
   res.json({ data: { imported: imported.length, failed: errors.length, errors, rows: imported } });
 });
 
@@ -425,13 +435,13 @@ async function seedLeaveTypes(shopId) {
   }
 }
 
-router.get('/leave-types', async (req, res) => {
+router.get('/leave-types', requirePermission('leave.view'), async (req, res) => {
   await seedLeaveTypes(req.user.shop_id);
   const rows = await all('SELECT * FROM leave_types WHERE shop_id = ? ORDER BY name', req.user.shop_id);
   res.json({ data: rows });
 });
 
-router.post('/leave-types', async (req, res) => {
+router.post('/leave-types', requirePermission('leave.manage'), async (req, res) => {
   const { name, annual_quota, paid } = req.body || {};
   const clean = String(name || '').trim();
   if (!clean) return bad(res, 'name required');
@@ -442,7 +452,7 @@ router.post('/leave-types', async (req, res) => {
   const id = uid('lvt');
   await run('INSERT INTO leave_types (id, shop_id, name, annual_quota, paid) VALUES (?,?,?,?,?)',
     id, req.user.shop_id, clean, quota, paid === false || paid === 0 ? 0 : 1);
-  audit(req.user.user_id, 'hr.leave_type.create', 'leave_type', id, clean);
+  await audit(req.user.user_id, 'hr.leave_type.create', 'leave_type', id, clean);
   res.status(201).json({ data: await get('SELECT * FROM leave_types WHERE id = ?', id) });
 });
 
@@ -461,7 +471,7 @@ async function ensureLeaveBalances(shopId, year, employeeId = null) {
   }
 }
 
-router.get('/leave-balances', async (req, res) => {
+router.get('/leave-balances', requirePermission('leave.view'), async (req, res) => {
   const year = Number(req.query.year || today().slice(0, 4));
   if (!Number.isInteger(year) || year < 2000 || year > 2100) return bad(res, 'invalid year');
   const employeeId = req.query.employee_id || null;
@@ -481,7 +491,7 @@ router.get('/leave-balances', async (req, res) => {
 });
 
 // ------------------------------------------------------------ leave requests
-router.get('/leaves', async (req, res) => {
+router.get('/leaves', requirePermission('leave.view'), async (req, res) => {
   const { status, employee_id, month } = req.query;
   const conds = ['l.shop_id = ?'];
   const args = [req.user.shop_id];
@@ -507,7 +517,7 @@ router.get('/leaves', async (req, res) => {
   res.json({ data: rows });
 });
 
-router.post('/leaves', async (req, res) => {
+router.post('/leaves', requirePermission('leave.view'), async (req, res) => {
   const { employee_id, leave_type_id, from_date, to_date, reason } = req.body || {};
   if (!employee_id || !leave_type_id) return bad(res, 'employee_id and leave_type_id required');
   if (!isDate(from_date) || !isDate(to_date)) return bad(res, 'from_date and to_date must be YYYY-MM-DD');
@@ -540,12 +550,12 @@ router.post('/leaves', async (req, res) => {
     `INSERT INTO leave_requests (id, shop_id, employee_id, leave_type_id, from_date, to_date, days, reason)
      VALUES (?,?,?,?,?,?,?,?)`,
     id, req.user.shop_id, employee_id, leave_type_id, from_date, to_date, requested, reason || null);
-  audit(req.user.user_id, 'hr.leave.create', 'leave_request', id,
+  await audit(req.user.user_id, 'hr.leave.create', 'leave_request', id,
     `${emp.emp_code} ${type.name} ${from_date}→${to_date} (${requested}d)`);
   res.status(201).json({ data: await get('SELECT * FROM leave_requests WHERE id = ?', id) });
 });
 
-router.post('/leaves/:id/decide', async (req, res) => {
+router.post('/leaves/:id/decide', requirePermission('leave.approve'), async (req, res) => {
   const { status, note } = req.body || {};
   if (!['approved', 'rejected'].includes(status)) return bad(res, 'status must be approved/rejected');
   const request = await get(
@@ -558,7 +568,7 @@ router.post('/leaves/:id/decide', async (req, res) => {
   if (status === 'rejected') {
     await run(`UPDATE leave_requests SET status = 'rejected', decided_by = ?, decided_at = now(), decision_note = ? WHERE id = ?`,
       req.user.user_id, note || null, request.id);
-    audit(req.user.user_id, 'hr.leave.reject', 'leave_request', request.id, `${request.from_date}→${request.to_date}`);
+    await audit(req.user.user_id, 'hr.leave.reject', 'leave_request', request.id, `${request.from_date}→${request.to_date}`);
     return res.json({ data: await get('SELECT * FROM leave_requests WHERE id = ?', request.id) });
   }
 
@@ -588,18 +598,18 @@ router.post('/leaves/:id/decide', async (req, res) => {
     }
     return tx.get('SELECT * FROM leave_requests WHERE id = ?', request.id);
   });
-  audit(req.user.user_id, 'hr.leave.approve', 'leave_request', request.id,
+  await audit(req.user.user_id, 'hr.leave.approve', 'leave_request', request.id,
     `${request.type_name} ${request.from_date}→${request.to_date} (${request.days}d)`);
   res.json({ data: result });
 });
 
-router.post('/leaves/:id/cancel', async (req, res) => {
+router.post('/leaves/:id/cancel', requirePermission('leave.view'), async (req, res) => {
   const request = await get('SELECT * FROM leave_requests WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!request) return res.status(404).json({ error: 'not_found' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'conflict', message: `Request already ${request.status}` });
   await run(`UPDATE leave_requests SET status = 'cancelled', decided_by = ?, decided_at = now() WHERE id = ?`,
     req.user.user_id, request.id);
-  audit(req.user.user_id, 'hr.leave.cancel', 'leave_request', request.id, `${request.from_date}→${request.to_date}`);
+  await audit(req.user.user_id, 'hr.leave.cancel', 'leave_request', request.id, `${request.from_date}→${request.to_date}`);
   res.json({ data: await get('SELECT * FROM leave_requests WHERE id = ?', request.id) });
 });
 
@@ -609,7 +619,7 @@ const SALARY_FIELDS = [
   'pf_inr', 'esi_inr', 'professional_tax_inr', 'tds_inr', 'other_deduction_inr',
 ];
 
-router.get('/salary', async (req, res) => {
+router.get('/salary', requirePermission('payroll.view'), async (req, res) => {
   const conds = ['s.shop_id = ?'];
   const args = [req.user.shop_id];
   if (req.query.employee_id) { conds.push('s.employee_id = ?'); args.push(req.query.employee_id); }
@@ -620,7 +630,7 @@ router.get('/salary', async (req, res) => {
   res.json({ data: rows });
 });
 
-router.post('/salary', async (req, res) => {
+router.post('/salary', requirePermission('payroll.manage'), async (req, res) => {
   const b = req.body || {};
   if (!b.employee_id) return bad(res, 'employee_id required');
   if (!isDate(b.effective_from)) return bad(res, 'effective_from must be YYYY-MM-DD');
@@ -635,7 +645,7 @@ router.post('/salary', async (req, res) => {
     const sets = SALARY_FIELDS.map((k) => `${k} = ?`);
     await run(`UPDATE salary_structures SET ${sets.join(', ')}, active = 1 WHERE id = ?`,
       ...SALARY_FIELDS.map((k) => round2(b[k])), existing.id);
-    audit(req.user.user_id, 'hr.salary.update', 'salary_structure', existing.id, `${emp.emp_code} from ${b.effective_from}`);
+    await audit(req.user.user_id, 'hr.salary.update', 'salary_structure', existing.id, `${emp.emp_code} from ${b.effective_from}`);
     return res.json({ data: await get('SELECT * FROM salary_structures WHERE id = ?', existing.id) });
   }
   const id = uid('sal');
@@ -643,12 +653,12 @@ router.post('/salary', async (req, res) => {
     `INSERT INTO salary_structures (id, shop_id, employee_id, effective_from, ${SALARY_FIELDS.join(', ')})
      VALUES (?,?,?,?,${SALARY_FIELDS.map(() => '?').join(',')})`,
     id, req.user.shop_id, emp.id, b.effective_from, ...SALARY_FIELDS.map((k) => round2(b[k])));
-  audit(req.user.user_id, 'hr.salary.create', 'salary_structure', id, `${emp.emp_code} from ${b.effective_from}`);
+  await audit(req.user.user_id, 'hr.salary.create', 'salary_structure', id, `${emp.emp_code} from ${b.effective_from}`);
   res.status(201).json({ data: await get('SELECT * FROM salary_structures WHERE id = ?', id) });
 });
 
 // ----------------------------------------------------------------- payroll
-router.get('/payroll', async (req, res) => {
+router.get('/payroll', requirePermission('payroll.view'), async (req, res) => {
   const rows = await all(
     `SELECT pr.*, COUNT(ps.id)::int AS employee_count,
             COALESCE(SUM(ps.gross_inr),0) AS gross_total,
@@ -660,7 +670,7 @@ router.get('/payroll', async (req, res) => {
   res.json({ data: rows.map((r) => ({ ...r, gross_total: round2(r.gross_total), net_total: round2(r.net_total) })) });
 });
 
-router.get('/payroll/:id', async (req, res) => {
+router.get('/payroll/:id', requirePermission('payroll.view'), async (req, res) => {
   const payroll = await get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!payroll) return res.status(404).json({ error: 'not_found' });
   const slips = await all(
@@ -676,7 +686,7 @@ router.get('/payroll/:id', async (req, res) => {
  * Create or refresh a DRAFT payroll run for a period.
  * A run that is locked/paid is immutable — correct it with an adjustment run.
  */
-router.post('/payroll/preview', async (req, res) => {
+router.post('/payroll/preview', requirePermission('payroll.manage'), async (req, res) => {
   const b = req.body || {};
   const period = String(b.period || '');
   if (!isPeriod(period)) return bad(res, 'period must be YYYY-MM');
@@ -764,25 +774,25 @@ router.post('/payroll/preview', async (req, res) => {
       lopDeduction, totalDeductions, net);
   }
 
-  audit(req.user.user_id, 'hr.payroll.preview', 'payroll_run', payroll.id, `${period}: ${employees.length - skipped.length} payslip(s)`);
+  await audit(req.user.user_id, 'hr.payroll.preview', 'payroll_run', payroll.id, `${period}: ${employees.length - skipped.length} payslip(s)`);
   const slips = await all(
     `SELECT ps.*, e.full_name, e.emp_code FROM payslips ps JOIN employees e ON e.id = ps.employee_id
      WHERE ps.payroll_run_id = ? ORDER BY e.full_name`, payroll.id);
   res.json({ data: { ...payroll, working_days: workingDays, payslips: slips, skipped } });
 });
 
-router.post('/payroll/:id/lock', async (req, res) => {
+router.post('/payroll/:id/lock', requirePermission('payroll.manage'), async (req, res) => {
   const payroll = await get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!payroll) return res.status(404).json({ error: 'not_found' });
   if (payroll.status !== 'draft') return res.status(409).json({ error: 'conflict', message: `Payroll is already ${payroll.status}` });
   const [count] = await all('SELECT COUNT(*)::int AS c FROM payslips WHERE payroll_run_id = ?', payroll.id);
   if (!count?.c) return res.status(409).json({ error: 'conflict', message: 'No payslips to lock — preview the payroll first' });
   await run(`UPDATE payroll_runs SET status = 'locked', locked_at = now() WHERE id = ?`, payroll.id);
-  audit(req.user.user_id, 'hr.payroll.lock', 'payroll_run', payroll.id, payroll.period);
+  await audit(req.user.user_id, 'hr.payroll.lock', 'payroll_run', payroll.id, payroll.period);
   res.json({ data: await get('SELECT * FROM payroll_runs WHERE id = ?', payroll.id) });
 });
 
-router.post('/payroll/:id/pay', async (req, res) => {
+router.post('/payroll/:id/pay', requirePermission('payroll.manage'), async (req, res) => {
   const payroll = await get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!payroll) return res.status(404).json({ error: 'not_found' });
   if (payroll.status === 'paid') return res.status(409).json({ error: 'conflict', message: 'Payroll is already paid' });
@@ -798,11 +808,11 @@ router.post('/payroll/:id/pay', async (req, res) => {
        VALUES (?,?,?,?,now(),?,?)`,
       uid('exp'), req.user.shop_id, 'salary', round2(totals.net), `Payroll ${payroll.period}`, req.user.user_id);
   });
-  audit(req.user.user_id, 'hr.payroll.pay', 'payroll_run', payroll.id, `${payroll.period}: ${round2(totals.net)} INR`);
+  await audit(req.user.user_id, 'hr.payroll.pay', 'payroll_run', payroll.id, `${payroll.period}: ${round2(totals.net)} INR`);
   res.json({ data: await get('SELECT * FROM payroll_runs WHERE id = ?', payroll.id) });
 });
 
-router.get('/payslips/:id', async (req, res) => {
+router.get('/payslips/:id', requirePermission('payroll.view'), async (req, res) => {
   const row = await get(
     `SELECT ps.*, e.full_name, e.emp_code, e.phone, e.email, e.joining_date, e.pan,
             e.bank_account, e.bank_ifsc, d.name AS department_name, g.name AS designation_name,

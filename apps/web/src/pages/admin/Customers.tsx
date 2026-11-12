@@ -82,7 +82,7 @@ function NewCustomerModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
           <span className="modal-hint">Marketing consent defaults to opted in.</span>
           <span className="grow" />
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn gold" onClick={save} disabled={saving}>
+          <button type="button" className="btn" onClick={save} disabled={saving}>
             {saving ? 'Saving…' : 'Save customer'}
           </button>
         </>
@@ -141,7 +141,7 @@ function EditCustomerModal({ customer, onClose, onSaved }: { customer: any; onCl
         <>
           <span className="grow" />
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn gold" onClick={save} disabled={saving}>
+          <button type="button" className="btn" onClick={save} disabled={saving}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
         </>
@@ -174,7 +174,7 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: s
           <>
             <span className="grow" />
             <button type="button" className="btn ghost" onClick={onClose}>Close</button>
-            {d && <button type="button" className="btn gold" onClick={() => setEditing(true)}>Edit customer</button>}
+            {d && <button type="button" className="btn primary" onClick={() => setEditing(true)}>Edit customer</button>}
           </>
         }
       >
@@ -334,7 +334,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
           <button type="button" className="btn ghost" onClick={() => query.refetch()} style={{ fontSize: 13 }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon paths={ICONS.refresh} size={14} />Refresh</span>
           </button>
-          <button type="button" className="btn gold" onClick={() => setNewOpen(true)}>+ New customer</button>
+          <button type="button" className="btn" onClick={() => setNewOpen(true)}>+ New customer</button>
         </div>
       </div>
 
@@ -370,7 +370,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
               <input type="date" value={draft.lastTo} onChange={(e) => setDraft({ ...draft, lastTo: e.target.value })} title="To" />
             </>
           )}
-          <button type="button" className="btn gold" onClick={search}>
+          <button type="button" className="btn primary" onClick={search}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon paths={ICONS.search} size={15} />Search</span>
           </button>
           {hasFilters && (
@@ -409,7 +409,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
                     <td>{c.email || '—'}</td>
                     <td>{c.city || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{c.purchase_count}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-gold-deep)', whiteSpace: 'nowrap' }}>{inr(c.total_spent_inr)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-ink)', whiteSpace: 'nowrap' }}>{inr(c.total_spent_inr)}</td>
                     <td>{c.marketing_consent ? <span className="badge ok">Opted in</span> : <span className="badge warn">No</span>}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button
@@ -443,7 +443,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
                 p === '...' ? (
                   <span key={`gap-${idx}`} style={{ padding: '0 4px', color: 'var(--color-muted)' }}>…</span>
                 ) : (
-                  <button type="button" key={p} onClick={() => setPage(p)} className={p === page ? 'btn gold' : 'btn ghost'} style={{ padding: '6px 11px', fontSize: 13, minWidth: 34 }}>{p}</button>
+                  <button type="button" key={p} onClick={() => setPage(p)} className={p === page ? 'btn primary' : 'btn ghost'} style={{ padding: '6px 11px', fontSize: 13, minWidth: 34 }}>{p}</button>
                 )
               ))}
               <button type="button" className="btn ghost" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={{ padding: '6px 12px', fontSize: 13 }}>Next ›</button>

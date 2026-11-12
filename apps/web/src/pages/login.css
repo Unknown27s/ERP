@@ -1,105 +1,131 @@
 /* ==========================================================================
-   Sign-in page — split brand / form card.
-   Namespaced with `.auth-` and built on the shared brand tokens in index.css
-   so it matches the public storefront (Cormorant headings, gold accents).
+   Sign-in page — split brand / form card, ERP blue theme.
+   Tokens come from index.css; the palette follows the specification:
+   primary #2563EB, sidebar #0F172A, page #F8FAFC, border #E2E8F0.
    ========================================================================== */
 
 .auth-page {
-  min-height: calc(100vh - 150px);
+  min-height: 100vh;
   display: flex; align-items: center; justify-content: center;
-  padding: 44px 22px 72px;
+  padding: 40px 22px;
   background:
-    radial-gradient(900px 420px at 10% -12%, rgba(214, 180, 92, .16), transparent 60%),
-    radial-gradient(720px 380px at 100% 0%, rgba(197, 141, 153, .14), transparent 55%),
-    var(--color-bg);
+    radial-gradient(900px 500px at 12% -12%, rgba(37, 99, 235, .12), transparent 60%),
+    radial-gradient(760px 420px at 100% 0%, rgba(2, 132, 199, .10), transparent 55%),
+    #F8FAFC;
 }
 
 .auth-card {
-  width: 100%; max-width: 940px;
-  display: grid; grid-template-columns: 1.05fr 1fr;
-  background: #fff; border: 1px solid var(--color-border);
+  width: 100%; max-width: 960px;
+  display: grid; grid-template-columns: 1.02fr 1fr;
+  background: #FFFFFF; border: 1px solid #E2E8F0;
   border-radius: 20px; overflow: hidden;
-  box-shadow: 0 24px 60px rgba(71, 16, 29, .14);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 28px 70px -30px rgba(15, 23, 42, .28);
   animation: pageIn var(--motion-page) var(--ease-standard);
 }
 
 /* ── Brand pane ───────────────────────────────────────────────────────── */
 .auth-brand {
-  position: relative; color: var(--color-ivory); overflow: hidden;
-  background: linear-gradient(155deg, var(--color-burgundy) 0%, var(--color-wine) 100%);
+  position: relative; color: #F8FAFC; overflow: hidden;
+  background: #0F172A;
 }
 .auth-brand::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(520px 320px at 82% 0%, rgba(214, 180, 92, .30), transparent 62%),
-    repeating-linear-gradient(135deg, rgba(214, 180, 92, .06) 0 10px, transparent 10px 20px);
+    radial-gradient(520px 340px at 85% -5%, rgba(37, 99, 235, .45), transparent 62%),
+    radial-gradient(400px 300px at 0% 100%, rgba(2, 132, 199, .22), transparent 60%),
+    repeating-linear-gradient(135deg, rgba(148, 163, 184, .07) 0 1px, transparent 1px 22px);
 }
 .auth-brand-inner {
   position: relative; z-index: 1; height: 100%;
   padding: 44px 40px; display: flex; flex-direction: column;
 }
-.auth-logo { height: 44px; width: auto; align-self: flex-start; margin-bottom: 24px; }
-.auth-brand-name {
-  font-family: var(--font-display); font-weight: 700;
-  font-size: 34px; line-height: 1.1; margin: 0 0 12px; color: #fff;
+.auth-mark {
+  width: 46px; height: 46px; border-radius: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #2563EB; color: #fff;
+  font-size: 21px; font-weight: 800; letter-spacing: -.5px;
+  box-shadow: 0 8px 24px -8px rgba(37, 99, 235, .8), inset 0 1px 0 rgba(255, 255, 255, .25);
+  margin-bottom: 22px;
+  overflow: hidden;
 }
-.auth-brand-name em { color: var(--color-gold); font-style: normal; }
+.auth-mark.has-logo {
+  background: #FFFFFF;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, .35);
+}
+.auth-brand-name {
+  font-family: var(--font-body); font-weight: 800;
+  font-size: 32px; line-height: 1.12; margin: 0 0 12px; color: #FFFFFF;
+  letter-spacing: -.6px;
+}
 .auth-brand-tag {
-  color: rgba(251, 243, 237, .78); font-size: 14px; line-height: 1.6;
-  margin: 0 0 28px; max-width: 32ch;
+  color: #CBD5E1; font-size: 14px; line-height: 1.65;
+  margin: 0 0 26px; max-width: 36ch;
 }
 .auth-points { list-style: none; margin: 0 0 auto; padding: 0; display: grid; gap: 13px; }
-.auth-points li { position: relative; padding-left: 26px; font-size: 13.5px; color: rgba(251, 243, 237, .9); }
-.auth-points li::before {
-  content: '✓'; position: absolute; left: 0; top: 0;
-  color: var(--color-gold); font-weight: 700;
+.auth-points li {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13.5px; color: #E2E8F0;
 }
-.auth-back {
-  margin-top: 30px; align-self: flex-start;
-  color: rgba(251, 243, 237, .72); text-decoration: none;
-  font-size: 13px; font-weight: 600; transition: color var(--motion-fast);
+.auth-points li svg { color: #60A5FA; flex-shrink: 0; }
+.auth-brand-foot {
+  margin-top: 32px; padding-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, .22);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 12px; color: #94A3B8;
 }
-.auth-back:hover { color: var(--color-gold); }
+.auth-company { font-weight: 600; color: #CBD5E1; }
 
 /* ── Form pane ────────────────────────────────────────────────────────── */
+.auth-form { background: #FFFFFF; }
 .auth-form-inner { padding: 44px 40px; }
 .auth-eyebrow {
   display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 2px;
-  text-transform: uppercase; color: var(--color-gold-deep); margin-bottom: 8px;
+  text-transform: uppercase; color: #2563EB; margin-bottom: 8px;
 }
-.auth-title { font-family: var(--font-display); font-size: 30px; font-weight: 600; margin: 0 0 4px; }
-.auth-sub { color: var(--color-muted); font-size: 13.5px; margin: 0 0 20px; }
+.auth-title {
+  font-family: var(--font-body); font-size: 28px; font-weight: 800;
+  letter-spacing: -.5px; margin: 0 0 4px; color: #0F172A;
+}
+.auth-sub { color: #64748B; font-size: 13.5px; margin: 0 0 20px; }
 
 .auth-pw { position: relative; }
 .auth-pw input { padding-right: 66px; }
 .auth-pw-toggle {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  border: 0; background: none; color: var(--color-gold-deep);
+  border: 0; background: none; color: #2563EB;
   font-weight: 700; font-size: 12px; cursor: pointer; padding: 7px 9px; border-radius: 6px;
   transition: background var(--motion-fast);
 }
-.auth-pw-toggle:hover { background: var(--color-blush); }
+.auth-pw-toggle:hover { background: #E0F2FE; }
 
 .auth-submit {
-  width: 100%; margin-top: 18px; padding: 13px; font-size: 15px; letter-spacing: .3px;
-  background: linear-gradient(135deg, var(--color-burgundy), var(--color-wine));
+  width: 100%; margin-top: 18px; padding: 13px; font-size: 15px; letter-spacing: .2px;
+  background: #2563EB;
 }
-.auth-submit:hover { background: linear-gradient(135deg, var(--color-wine), var(--color-wine-hover)); }
+.auth-submit:hover { background: #1D4ED8; }
 .auth-submit:disabled { opacity: .65; cursor: progress; }
 
-.auth-seed { margin-top: 16px; font-size: 12px; color: var(--color-muted); }
-.auth-seed code {
-  background: var(--color-card); border: 1px solid var(--color-border);
-  border-radius: 5px; padding: 1px 6px; font-size: 11.5px; color: var(--color-espresso);
+.auth-demo {
+  margin-top: 22px; padding: 14px 16px;
+  border: 1px dashed #E2E8F0; border-radius: 12px;
+  background: #F8FAFC;
+}
+.auth-demo strong { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: #64748B; margin-bottom: 8px; }
+.auth-demo p { margin: 4px 0; font-size: 12.5px; color: #0F172A; }
+.auth-demo .auth-demo-note { color: #64748B; font-size: 11.5px; margin-top: 8px; }
+.auth-demo code {
+  background: #FFFFFF; border: 1px solid #E2E8F0;
+  border-radius: 5px; padding: 1px 6px; font-size: 11.5px; color: #0F172A;
 }
 
 @media (max-width: 780px) {
-  .auth-page { padding: 26px 16px 48px; }
+  .auth-page { padding: 20px 14px; }
   .auth-card { grid-template-columns: 1fr; max-width: 460px; }
   .auth-brand-inner { padding: 26px 24px 24px; }
-  .auth-brand-name { font-size: 27px; margin-bottom: 8px; }
-  .auth-brand-tag { margin-bottom: 10px; }
+  .auth-brand-name { font-size: 26px; }
+  .auth-brand-tag { margin-bottom: 14px; }
   .auth-points { display: none; }
-  .auth-back { margin-top: 10px; }
+  .auth-brand-foot { margin-top: 16px; }
   .auth-form-inner { padding: 28px 24px; }
 }

@@ -13,52 +13,52 @@ const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const periodOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
-const DEPARTMENTS = ['Sales', 'Billing', 'Inventory', 'Workshop', 'Accounts'];
+const DEPARTMENTS = ['Administration', 'Human Resources', 'Finance', 'Sales', 'Stores', 'Operations'];
 const DESIGNATIONS = [
-  ['Store Manager', 'M1'], ['Sales Executive', 'E2'], ['Billing Executive', 'E2'],
-  ['Inventory Coordinator', 'E2'], ['Senior Goldsmith', 'S1'], ['Accounts Executive', 'E2'],
+  ['General Manager', 'M1'], ['HR Manager', 'M1'], ['Accounts Executive', 'E2'],
+  ['Sales Executive', 'E2'], ['Store Keeper', 'E2'], ['Operations Executive', 'E2'],
 ];
 
 const STAFF = [
   {
-    code: 'EMP-001', name: 'Rajesh Nair', dept: 'Sales', desig: 'Store Manager', type: 'full_time',
-    join: '2019-04-01', status: 'active', phone: '+91 98450 10001', email: 'rajesh.nair@shop.local',
+    code: 'EMP-001', name: 'Meera Menon', dept: 'Administration', desig: 'General Manager', type: 'full_time',
+    join: '2019-04-01', status: 'active', phone: '+91 98450 10001', email: 'meera.menon@marvelsoftware.local',
     pan: 'ABCPN1234F', bank: '50100234567891', ifsc: 'HDFC0001234',
     salary: { basic: 45000, hra: 18000, conv: 3000, special: 6000, incentive: 5000, pf: 1800, pt: 200, tds: 3000 },
   },
   {
-    code: 'EMP-002', name: 'Priya Desai', dept: 'Sales', desig: 'Sales Executive', type: 'full_time',
-    join: '2021-06-15', status: 'active', phone: '+91 98450 10002', email: 'priya.desai@shop.local',
+    code: 'EMP-002', name: 'Priya Nair', dept: 'Sales', desig: 'Sales Executive', type: 'full_time',
+    join: '2021-06-15', status: 'active', phone: '+91 98450 10002', email: 'priya.nair@marvelsoftware.local',
     pan: 'ABCPD2345G', bank: '50100234567892', ifsc: 'ICIC0004567',
     salary: { basic: 25000, hra: 10000, conv: 2000, special: 3000, incentive: 4000, pf: 1800, pt: 200, tds: 0 },
   },
   {
-    code: 'EMP-003', name: 'Amit Joshi', dept: 'Billing', desig: 'Billing Executive', type: 'full_time',
-    join: '2022-02-01', status: 'active', phone: '+91 98450 10003', email: 'amit.joshi@shop.local',
+    code: 'EMP-003', name: 'Rahul Verma', dept: 'Finance', desig: 'Accounts Executive', type: 'full_time',
+    join: '2022-02-01', status: 'active', phone: '+91 98450 10003', email: 'rahul.verma@marvelsoftware.local',
     pan: 'ABCJA3456H', bank: '50100234567893', ifsc: 'SBIN0007890',
     salary: { basic: 22000, hra: 8800, conv: 2000, special: 2000, incentive: 2500, pf: 1800, pt: 200, tds: 0 },
   },
   {
-    code: 'EMP-004', name: 'Lakshmi Iyer', dept: 'Inventory', desig: 'Inventory Coordinator', type: 'full_time',
-    join: '2020-09-10', status: 'active', phone: '+91 98450 10004', email: 'lakshmi.iyer@shop.local',
+    code: 'EMP-004', name: 'Kiran Patel', dept: 'Stores', desig: 'Store Keeper', type: 'full_time',
+    join: '2020-09-10', status: 'active', phone: '+91 98450 10004', email: 'kiran.patel@marvelsoftware.local',
     pan: 'ABCLI4567J', bank: '50100234567894', ifsc: 'AXIS0002345',
     salary: { basic: 24000, hra: 9600, conv: 2000, special: 2500, incentive: 2000, pf: 1800, pt: 200, tds: 0 },
   },
   {
-    code: 'EMP-005', name: 'Suresh Kumar', dept: 'Workshop', desig: 'Senior Goldsmith', type: 'contract',
-    join: '2018-11-05', status: 'active', phone: '+91 98450 10005', email: 'suresh.kumar@shop.local',
+    code: 'EMP-005', name: 'Suresh Kumar', dept: 'Operations', desig: 'Operations Executive', type: 'contract',
+    join: '2018-11-05', status: 'active', phone: '+91 98450 10005', email: 'suresh.kumar@marvelsoftware.local',
     pan: 'ABCKS5678K', bank: '50100234567895', ifsc: 'HDFC0005678',
     salary: { basic: 30000, hra: 0, conv: 0, special: 5000, incentive: 0, pf: 0, pt: 0, tds: 0 },
   },
   {
     code: 'EMP-006', name: 'Neha Gupta', dept: 'Sales', desig: 'Sales Executive', type: 'full_time',
-    join: '2023-07-20', status: 'notice', phone: '+91 98450 10006', email: 'neha.gupta@shop.local',
+    join: '2023-07-20', status: 'notice', phone: '+91 98450 10006', email: 'neha.gupta@marvelsoftware.local',
     pan: 'ABCNG6789L', bank: '50100234567896', ifsc: 'KKBK0003456',
     salary: { basic: 23000, hra: 9200, conv: 2000, special: 2000, incentive: 3000, pf: 1800, pt: 200, tds: 0 },
   },
   {
     code: 'EMP-007', name: 'Vikram Rao', dept: 'Sales', desig: 'Sales Executive', type: 'full_time',
-    join: '2017-01-15', status: 'exited', phone: '+91 98450 10007', email: 'vikram.rao@shop.local',
+    join: '2017-01-15', status: 'exited', phone: '+91 98450 10007', email: 'vikram.rao@marvelsoftware.local',
     pan: 'ABCVR7890M', bank: '50100234567897', ifsc: 'HDFC0009012',
     salary: { basic: 21000, hra: 8400, conv: 2000, special: 2000, incentive: 2000, pf: 1800, pt: 200, tds: 0 },
   },

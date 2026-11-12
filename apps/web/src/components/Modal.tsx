@@ -133,7 +133,7 @@ export function ModalSearch({
           placeholder={placeholder || 'Search…'}
         />
       </div>
-      <button type="button" className="btn gold" onClick={onSearch}>
+      <button type="button" className="btn primary" onClick={onSearch}>
         <Icon paths={ICONS.search} size={15} />
         Search
       </button>

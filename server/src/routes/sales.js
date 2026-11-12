@@ -1,6 +1,6 @@
 const express = require('express');
 const { get, all, run, withTransaction, nowFn, uid } = require('../db');
-const { auth, requireRoles, audit } = require('../middleware/auth');
+const { auth, requireAnyPermission, requirePermission, audit } = require('../middleware/auth');
 const { currentRate, rateFreshness } = require('../services/rates');
 const { priceLine } = require('../services/pricing');
 const { validateOffer } = require('./ops');
@@ -43,14 +43,14 @@ async function getOrCreateCustomer(shopId, inline) {
 }
 
 // Draft = reserves stock so two staff cannot sell the same unique piece (§5.5 atomicity)
-router.post('/sales/draft', requireRoles('admin', 'billing'), async (req, res) => {
+router.post('/sales/draft', requireAnyPermission('crm.manage', 'finance.manage'), async (req, res) => {
   const { customer_id, customer_inline, lines = [] } = req.body || {};
   if (!lines.length) return res.status(400).json({ error: 'bad_request', message: 'lines required' });
   if (customer_inline) {
     const missing = ['name', 'phone', 'address_line1', 'city', 'state', 'postal_code'].filter((k) => !String(customer_inline[k] ?? '').trim());
     if (missing.length) return res.status(400).json({ error: 'bad_request', message: `customer_inline missing required fields: ${missing.join(', ')}`, fields: missing });
   }
-  let customer = customer_id ? await get('SELECT * FROM customers WHERE id=?', customer_id) : null;
+  let customer = customer_id ? await get('SELECT * FROM customers WHERE id=? AND shop_id=?', customer_id, req.user.shop_id) : null;
   if (customer_inline) customer = await getOrCreateCustomer(req.user.shop_id, customer_inline);
   const id = uid('sal');
   try {
@@ -58,7 +58,7 @@ router.post('/sales/draft', requireRoles('admin', 'billing'), async (req, res) =
       await tx.run(`INSERT INTO sales (id, shop_id, invoice_no, customer_id, sold_at, subtotal_inr, total_inr, status, created_by)
         VALUES (?,?,?,?,${nowFn()},0,0,'draft',?)`, id, req.user.shop_id, `DRAFT-${id.slice(-6)}`, customer ? customer.id : null, req.user.user_id);
       for (const l of lines) {
-        let prod = l.product_id ? await tx.get('SELECT * FROM products WHERE id=?', l.product_id) : null;
+        let prod = l.product_id ? await tx.get('SELECT * FROM products WHERE id=? AND shop_id=?', l.product_id, req.user.shop_id) : null;
         if (!prod && l.sku) {
           prod = await tx.get('SELECT * FROM products WHERE sku=? AND shop_id=?', l.sku, req.user.shop_id);
           if (prod) l.product_id = prod.id;
@@ -84,8 +84,8 @@ router.post('/sales/draft', requireRoles('admin', 'billing'), async (req, res) =
         if (!prod) throw new Error(`product ${l.product_id || l.sku || ''} not found`);
         if (prod.status !== 'reserved') {
           if (prod.status !== 'available') throw new Error(`${prod.sku} is ${prod.status} — cannot bill`);
-          await tx.run(`UPDATE products SET status='reserved' WHERE id=? AND status='available'`, l.product_id);
-          const chk = await tx.get('SELECT status FROM products WHERE id=?', l.product_id);
+          await tx.run(`UPDATE products SET status='reserved' WHERE id=? AND shop_id=? AND status='available'`, l.product_id, req.user.shop_id);
+          const chk = await tx.get('SELECT status FROM products WHERE id=? AND shop_id=?', l.product_id, req.user.shop_id);
           if (chk.status !== 'reserved') throw new Error(`${prod.sku} was just taken by another sale`);
         }
         await tx.run(`INSERT INTO sale_items (id, sale_id, product_id, sku, name, purity, net_gold_weight_g, rate_24k_per_g_inr, gold_value_inr, making_charge_inr, line_total_inr)
@@ -95,13 +95,13 @@ router.post('/sales/draft', requireRoles('admin', 'billing'), async (req, res) =
       }
     });
   } catch (e) { return res.status(409).json({ error: 'reserve_failed', message: e.message }); }
-  audit(req.user.user_id, 'sale.draft', 'sale', id, `${lines.length} lines reserved`);
+  await audit(req.user.user_id, 'sale.draft', 'sale', id, `${lines.length} lines reserved`);
   res.status(201).json({ data: await get('SELECT * FROM sales WHERE id=?', id) });
 });
 
 // Finalize — transactional, immutable snapshot (§4/§5.5). Pricing formula unchanged.
-router.post('/sales/:id/finalize', requireRoles('admin', 'billing'), async (req, res) => {
-  const sale = await get('SELECT * FROM sales WHERE id=?', req.params.id);
+router.post('/sales/:id/finalize', requireAnyPermission('crm.manage', 'finance.manage'), async (req, res) => {
+  const sale = await get('SELECT * FROM sales WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
   if (!sale) return res.status(404).json({ error: 'not_found' });
   if (sale.status === 'finalized') return res.status(409).json({ error: 'already_finalized' });
   const { payments = [], tax_rate_pct = 3, discount_inr: overall_discount_inr, custom_final_price_inr } = req.body || {};
@@ -118,7 +118,7 @@ router.post('/sales/:id/finalize', requireRoles('admin', 'billing'), async (req,
     await withTransaction(async (tx) => {
       let subtotal = 0, discount = 0, tax = 0, total = 0;
       for (const item of items) {
-        const prod = await tx.get('SELECT * FROM products WHERE id=?', item.product_id);
+        const prod = await tx.get('SELECT * FROM products WHERE id=? AND shop_id=?', item.product_id, req.user.shop_id);
         if (!prod || prod.status !== 'reserved') throw new Error(`${item.sku} is no longer reserved`);
         const reqLine = (req.body.lines || []).find(l => l.product_id === item.product_id) || {};
         let disc = Number(reqLine.discount_inr) || 0;
@@ -133,7 +133,7 @@ router.post('/sales/:id/finalize', requireRoles('admin', 'billing'), async (req,
           WHERE id=?`, prod.purity, prod.net_gold_weight_g, rate.rate_24k_per_g_inr, calc.gold_value_inr, calc.making_charge_inr,
           calc.stone_value_inr, calc.wastage_charge_inr, calc.other_charges_inr, calc.discount_inr, calc.tax_inr,
           calc.line_total_inr, reqLine.offer_code || null, item.id);
-        await tx.run(`UPDATE products SET status='sold' WHERE id=?`, prod.id);
+        await tx.run(`UPDATE products SET status='sold' WHERE id=? AND shop_id=?`, prod.id, req.user.shop_id);
         await tx.run(`INSERT INTO stock_movements (id, product_id, movement_type, qty_delta, weight_delta_g, reference_type, reference_id, reason, actor_id)
           VALUES (?,?,?,?,?,?,?,?,?)`, uid('stm'), prod.id, 'sale', -1, -prod.net_gold_weight_g, 'sale', sale.id, 'finalized sale', req.user.user_id);
         if (reqLine.offer_code) await tx.run('UPDATE offers SET redeemed = redeemed + 1 WHERE code=?', reqLine.offer_code);
@@ -160,13 +160,13 @@ router.post('/sales/:id/finalize', requireRoles('admin', 'billing'), async (req,
           uid('pay'), sale.id, p.method, p.amount_inr, p.reference || null);
       }
       if (sale.customer_id) {
-        await tx.run(`UPDATE customers SET total_spent_inr = total_spent_inr + ?, purchase_count = purchase_count + 1, last_purchase_at = ${nowFn()} WHERE id=?`,
-          finalTotal, sale.customer_id);
+        await tx.run(`UPDATE customers SET total_spent_inr = total_spent_inr + ?, purchase_count = purchase_count + 1, last_purchase_at = ${nowFn()} WHERE id=? AND shop_id=?`,
+          finalTotal, sale.customer_id, req.user.shop_id);
       }
     });
   } catch (e) { return res.status(409).json({ error: 'finalize_failed', message: e.message }); }
   const done = await get('SELECT * FROM sales WHERE id=?', sale.id);
-  audit(req.user.user_id, 'sale.finalize', 'sale', sale.id, `${done.invoice_no} ₹${done.total_inr}${fresh.status === 'stale' ? ' (STALE RATE acknowledged)' : ''}`);
+  await audit(req.user.user_id, 'sale.finalize', 'sale', sale.id, `${done.invoice_no} ₹${done.total_inr}${fresh.status === 'stale' ? ' (STALE RATE acknowledged)' : ''}`);
   // Thank-you email (fire-and-forget — email problems must never fail a sale).
   if (sale.customer_id) {
     const cust = await get('SELECT * FROM customers WHERE id=?', sale.customer_id);
@@ -178,7 +178,7 @@ router.post('/sales/:id/finalize', requireRoles('admin', 'billing'), async (req,
   res.json({ data: { ...done, lines: await all('SELECT * FROM sale_items WHERE sale_id=?', sale.id), payments: await all('SELECT * FROM payments WHERE sale_id=?', sale.id), rate_snapshot: rate, rate_warning: fresh.status === 'stale' ? `Rate ${fresh.ageMinutes} min old` : null } });
 });
 
-router.get('/sales', async (req, res) => {
+router.get('/sales', requireAnyPermission('finance.view', 'crm.view'), async (req, res) => {
   const { from, to, q, page = 1, limit = 20 } = req.query;
   const conds = ['s.shop_id = ?']; const args = [req.user.shop_id];
   if (req.user.role === 'billing') { conds.push('s.created_by = ?'); args.push(req.user.user_id); }
@@ -191,7 +191,7 @@ router.get('/sales', async (req, res) => {
   const total = (await get(`SELECT COUNT(*) n FROM sales s LEFT JOIN customers c ON c.id=s.customer_id WHERE ${conds.join(' AND ')}`, ...args)).n;
   res.json({ data: rows, total, page: Number(page), limit: Number(limit) });
 });
-router.get('/sales/:id', async (req, res) => {
+router.get('/sales/:id', requireAnyPermission('finance.view', 'crm.view'), async (req, res) => {
   const sale = await get(`SELECT s.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email, c.customer_code,
     c.birthday AS customer_birthday, c.anniversary AS customer_anniversary,
     c.address_line1 AS customer_address_line1, c.city AS customer_city, c.state AS customer_state, c.postal_code AS customer_postal_code,
@@ -205,8 +205,8 @@ router.get('/sales/:id', async (req, res) => {
 });
 
 // Void / return / refund — auditable, never rewrites history (§4)
-router.post('/sales/:id/void', requireRoles('admin'), async (req, res) => {
-  const sale = await get('SELECT * FROM sales WHERE id=?', req.params.id);
+router.post('/sales/:id/void', requirePermission('finance.manage'), async (req, res) => {
+  const sale = await get('SELECT * FROM sales WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
   if (!sale) return res.status(404).json({ error: 'not_found' });
   if (sale.status !== 'finalized') return res.status(409).json({ error: 'conflict', message: 'only finalized sales can be voided' });
   const { reason } = req.body || {};
@@ -215,14 +215,14 @@ router.post('/sales/:id/void', requireRoles('admin'), async (req, res) => {
     await tx.run(`UPDATE sales SET status='voided' WHERE id=?`, sale.id);
     const items = await tx.all('SELECT * FROM sale_items WHERE sale_id=?', sale.id);
     for (const it of items) {
-      await tx.run(`UPDATE products SET status='available' WHERE id=?`, it.product_id);
+      await tx.run(`UPDATE products SET status='available' WHERE id=? AND shop_id=?`, it.product_id, req.user.shop_id);
       await tx.run(`INSERT INTO stock_movements (id, product_id, movement_type, qty_delta, reference_type, reference_id, reason, actor_id)
         VALUES (?,?,?,?,?,?,?,?)`, uid('stm'), it.product_id, 'return', 1, 'sale', sale.id, `void: ${reason}`, req.user.user_id);
       await tx.run('INSERT INTO returns_refunds (id, sale_id, sale_item_id, reason, refund_amount_inr, restock, created_by) VALUES (?,?,?,?,?,?,?)',
         uid('ret'), sale.id, it.id, reason, it.line_total_inr, 1, req.user.user_id);
     }
   });
-  audit(req.user.user_id, 'sale.void', 'sale', sale.id, reason, reason);
+  await audit(req.user.user_id, 'sale.void', 'sale', sale.id, reason, reason);
   res.json({ data: await get('SELECT * FROM sales WHERE id=?', sale.id) });
 });
 

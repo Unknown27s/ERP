@@ -19,8 +19,10 @@ function httpError(status, code, message) {
 }
 
 /** Deliver a campaign's queued recipients. Consent-gated; idempotent. */
-async function sendCampaign(campaignId, { actorId = null } = {}) {
-  const cam = await get('SELECT * FROM campaigns WHERE id = ?', campaignId);
+async function sendCampaign(campaignId, { actorId = null, shopId = null } = {}) {
+  const cam = shopId
+    ? await get('SELECT * FROM campaigns WHERE id = ? AND shop_id = ?', campaignId, shopId)
+    : await get('SELECT * FROM campaigns WHERE id = ?', campaignId);
   if (!cam) throw httpError(404, 'not_found', 'Campaign not found');
   if (cam.approval_status !== 'approved') {
     throw httpError(409, 'not_approved', 'Manual campaigns need explicit approval before send (§10 acceptance)');
@@ -68,7 +70,7 @@ async function runDueCampaigns() {
   const summary = { campaigns: 0, sent: 0, skipped: 0 };
   for (const cam of due) {
     try {
-      const r = await sendCampaign(cam.id, { actorId: cam.created_by });
+      const r = await sendCampaign(cam.id, { actorId: cam.created_by, shopId: cam.shop_id });
       summary.campaigns++;
       summary.sent += r.sent;
       summary.skipped += r.skipped;

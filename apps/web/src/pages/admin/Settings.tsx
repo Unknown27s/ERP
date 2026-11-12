@@ -1,43 +1,121 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../../lib/api';
+import { useBranding } from '../../hooks/branding';
+
+const FIELDS: { group: string; note?: string; fields: [string, string, string?][] }[] = [
+  {
+    group: 'Branding',
+    note: 'These names appear on the sign-in screen, sidebar and browser title.',
+    fields: [
+      ['product_name', 'Product name', 'Shown in the sidebar and sign-in screen'],
+      ['company_name', 'Company display name'],
+      ['company_legal_name', 'Registered legal name'],
+    ],
+  },
+  {
+    group: 'Contact',
+    fields: [
+      ['company_email', 'Company email'],
+      ['company_phone', 'Phone'],
+      ['company_address', 'Address'],
+    ],
+  },
+  {
+    group: 'Regional & accounting',
+    note: 'Configure default timezone, currency code, and financial year cycle.',
+    fields: [
+      ['timezone', 'Time zone'],
+      ['currency', 'Currency code'],
+      ['financial_year_start', 'Financial year start (MM-DD)'],
+    ],
+  },
+  {
+    group: 'Invoicing',
+    fields: [
+      ['invoice_prefix', 'Invoice number prefix'],
+      ['invoice_footer', 'Invoice footer text'],
+    ],
+  },
+];
 
 export default function Settings() {
   const { data, refetch } = useQuery({ queryKey: ['settings'], queryFn: () => api.get('/admin/settings') });
-  const [form, setForm] = useState<any | null>(null);
+  const { refresh } = useBranding();
+  const [form, setForm] = useState<Record<string, string> | null>(null);
   const [msg, setMsg] = useState('');
+  const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
   const cur = form || data?.data || {};
   const set = (k: string, v: string) => setForm({ ...cur, [k]: v });
-  const savePut = async () => {
-    setMsg('');
+
+  const save = async () => {
+    setMsg(''); setError(false); setBusy(true);
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || '/api'}/admin/settings`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('gs_token') || ''}` },
-        body: JSON.stringify(form || {}),
-      }).then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(b.message || 'save failed'); });
-      setMsg('Settings saved.'); setForm(null); refetch();
-    } catch (e: any) { setMsg(e.message); }
+      await api.put('/admin/settings', form || {});
+      setMsg('Settings saved. Branding refreshed.');
+      setForm(null);
+      refetch();
+      refresh();
+    } catch (e: any) {
+      setMsg(e.message || 'Could not save settings');
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
   };
-  const fields: [string, string][] = [
-    ['shop_name', 'Shop name'], ['shop_address', 'Shop address'], ['shop_phone', 'Shop phone'],
-    ['invoice_prefix', 'Invoice prefix'], ['invoice_footer', 'Invoice footer text'],
-    ['label_width_mm', 'Label width (mm)'], ['label_height_mm', 'Label height (mm)'],
-    ['label_margin_mm', 'Label margin (mm)'],
-  ];
+
   return (
-    <div className="page">
-      <h1 style={{ fontFamily: 'var(--font-display)', margin: 0 }}>Settings</h1>
-      <p style={{ color: 'var(--color-muted)' }}>Shop details, invoice text, and barcode label layout. Changes are audited.</p>
-      {msg && <div className="card" style={{ marginBottom: 12 }}>{msg}</div>}
-      <div className="card" style={{ maxWidth: 560 }}>
-        {fields.map(([k, l]) => (
-          <div key={k}><label className="lbl">{l}</label><input value={cur[k] || ''} onChange={(e) => set(k, e.target.value)} /></div>))}
-        <label className="lbl">Show selling price on labels</label>
-        <select value={cur.label_show_price || 'yes'} onChange={(e) => set('label_show_price', e.target.value)}>
-          <option value="yes">Yes (server-computed estimate)</option>
-          <option value="no">No</option>
-        </select>
-        <button className="btn gold" style={{ marginTop: 14 }} onClick={savePut}>Save settings</button>
+    <div className="page hr-page">
+      <header className="hr-head">
+        <div className="hr-head-copy">
+          <span className="hr-eyebrow">System</span>
+          <h1>Company settings</h1>
+          <p>One company record shared by every module. Changes are audited with your user and time.</p>
+        </div>
+      </header>
+
+      {msg && <div className={`hr-msg${error ? ' err' : ''}`}>{msg}</div>}
+
+      <div className="settings-stack">
+        {FIELDS.map((section) => (
+          <div className="hr-card" key={section.group}>
+            <div className="hr-card-head">
+              <h2>{section.group}</h2>
+              {section.note && <span className="sub">{section.note}</span>}
+            </div>
+            <div className="hr-card-body">
+              <div className="hr-form-grid">
+                {section.fields.map(([k, label, hint]) => (
+                  <div className="hr-field" key={k}>
+                    <label className="lbl">{label}</label>
+                    {k === 'timezone' ? (
+                      <select value={cur[k] || ''} onChange={(e) => set(k, e.target.value)}>
+                        {['Asia/Kolkata', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'UTC'].map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+                      </select>
+                    ) : k === 'currency' ? (
+                      <select value={cur[k] || ''} onChange={(e) => set(k, e.target.value)}>
+                        {['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'].map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    ) : (
+                      <input value={cur[k] || ''} onChange={(e) => set(k, e.target.value)} />
+                    )}
+                    {hint && <span className="hint">{hint}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        <div className="hr-card">
+          <div className="hr-card-foot">
+            <span className="modal-hint">Currency and financial year affect how every module formats and groups money.</span>
+            <span className="grow" />
+            <button type="button" className="btn ghost" onClick={() => setForm(null)} disabled={!form}>Discard changes</button>
+            <button type="button" className="btn" onClick={save} disabled={busy || !form}>{busy ? 'Saving…' : 'Save settings'}</button>
+          </div>
+        </div>
       </div>
     </div>
   );

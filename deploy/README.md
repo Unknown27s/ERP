@@ -6,8 +6,8 @@ ports 80/443 and TLS; it reverse-proxies to the web container.
 ```
 Internet ─▶ Apache / Webuzo (demo.marvelslice.com, TLS 80/443)
               └─▶ 127.0.0.1:8083
-                     └─▶ goldshop-web (nginx: SPA + proxy /api)
-                            └─▶ goldshop-api :4000 ─▶ Supabase Cloud (Postgres)
+                     └─▶ erp-web (nginx: SPA + proxy /api)
+                            └─▶ erp-api :4000 ─▶ Supabase Cloud (Postgres)
 ```
 
 The app is stateless — the only durable store is Postgres — so containers are
@@ -17,7 +17,7 @@ disposable and `docker compose up -d --build` is a full deploy.
 
 | File | Purpose |
 | --- | --- |
-| `docker-compose.yml` | `goldshop-api` + `goldshop-web` (build context = repo root) |
+| `docker-compose.yml` | `erp-api` + `erp-web` (build context = repo root) |
 | `server/Dockerfile` | API image; ships `packages/` and `supabase/migrations` |
 | `apps/web/Dockerfile` | Builds the Vite SPA, serves it via nginx |
 | `apps/web/nginx.conf` | In-container nginx: SPA fallback + `/api` proxy |
@@ -79,8 +79,8 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}'
 4. Apply schema + demo data once (the API also runs migrations on boot):
 
    ```bash
-   docker compose run --rm goldshop-api node server/src/migrate.js
-   docker compose run --rm goldshop-api node server/src/seed.js
+   docker compose run --rm erp-api node server/src/migrate.js
+   docker compose run --rm erp-api node server/src/seed.js
    ```
 
 ## Environment & secrets (why there's no `.env.production`)
@@ -115,7 +115,7 @@ file. That's why there is deliberately no `.env.production`:
 git pull
 docker compose up -d --build
 docker compose ps
-docker compose logs -f goldshop-api
+docker compose logs -f erp-api
 ```
 
 ## Verify
@@ -131,13 +131,13 @@ docker compose logs -f goldshop-api
 - Supabase Cloud free tier **pauses after ~1 week idle** — unpause from the
   dashboard, or keep the project warm for a live demo.
 - Always recreate **both** containers together. The in-container nginx resolves
-  `goldshop-api` once at startup; recreating `goldshop-api` alone leaves
-  `goldshop-web` pointing at a stale IP (502).
+  `erp-api` once at startup; recreating `erp-api` alone leaves
+  `erp-web` pointing at a stale IP (502).
 - Rollback = `git checkout <previous tag> && docker compose up -d --build`.
 
 ## Troubleshooting
 
-- **`goldshop-api` exits at boot with "Missing DATABASE_URL"** — `.env` isn't
+- **`erp-api` exits at boot with "Missing DATABASE_URL"** — `.env` isn't
   next to `docker-compose.yml`, or `env_file` couldn't read it.
 - **`DB init failed: connect ENETUNREACH <ipv6-address>:5432`** — you're using the
   IPv6-only direct Supabase host on a VPS without IPv6. Switch `DATABASE_URL` to
@@ -146,12 +146,12 @@ docker compose logs -f goldshop-api
   found`** — the pooler can't identify your project. The username must be
   `postgres.<project-ref>` (the ref is your project's subdomain/ID), **not**
   `postgres`. Verify with:
-  `docker compose run --rm goldshop-api node -e "const u=new URL(process.env.DATABASE_URL);console.log(u.username,u.host,u.pathname)"`
+  `docker compose run --rm erp-api node -e "const u=new URL(process.env.DATABASE_URL);console.log(u.username,u.host,u.pathname)"`
 - **SSL errors connecting to Postgres** — the pool hardcodes
   `ssl: { rejectUnauthorized: false }` (`server/src/db.js:41`), which is correct
   for Supabase Cloud (SSL is required). If you ever point `DATABASE_URL` at a
   local Postgres with SSL off, make that option conditional.
-- **`/api` returns 502** — `goldshop-web` is pointing at a stale `goldshop-api`
+- **`/api` returns 502** — `erp-web` is pointing at a stale `erp-api`
   IP. Recreate both: `docker compose up -d --build`.
 - **Subdomain 404 / Webuzo page instead of the app** — the `.htaccess` isn't in
   the subdomain's DocumentRoot, or `ProxyPass` was put *in* `.htaccess` (invalid
