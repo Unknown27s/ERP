@@ -82,6 +82,22 @@ npm run dev
 
 Open <http://localhost:5173>. The API is at <http://localhost:4000/api>.
 
+### Docker deployment
+
+The production image is the root [`Dockerfile`](./Dockerfile) (SPA + API in one
+container). Apache/Webuzo on the host terminates TLS and proxies to a
+loopback-only port; each co-hosted app gets its own Docker network and its own
+`8086-8099` port.
+
+```bash
+cp .env.example .env        # set DATABASE_URL, JWT_SECRET, SMTP_*
+docker compose up -d --build
+```
+
+The ERP uses `127.0.0.1:8086`. Full runbook (Webuzo vhost, SSL, seeding,
+troubleshooting): [`deploy/README.md`](./deploy/README.md) and
+[`deploy/apache/README.md`](./deploy/apache/README.md).
+
 ### Branding and logo
 
 The product/company name is read at runtime from `shop_settings` (`product_name`, `company_name`) via `GET /api/config`, so renaming it in **Company settings** updates the login page, sidebar and browser title without a rebuild.

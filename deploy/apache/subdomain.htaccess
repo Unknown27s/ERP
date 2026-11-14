@@ -1,23 +1,32 @@
-# Reverse-proxy .htaccess for demo.marvelslice.com
+# Reverse-proxy .htaccess for the ERP domain.
 #
-# INSTALL: copy this file into the DocumentRoot of demo.marvelslice.com and
-# rename it to `.htaccess` (e.g. Webuzo's docroot for that subdomain).
-# Verify the docroot with:
-#   grep -rn "demo.marvelslice.com" /usr/local/apps/apache/conf/ | grep -i documentroot
+# INSTALL: copy this file into the DocumentRoot of the domain/subdomain in
+# Webuzo, then rename it to `.htaccess`. Find the docroot with:
+#   grep -rn "ServerName your-domain.com" /usr/local/apps/apache/conf/
+# or:
+#   /usr/local/apps/apache/bin/httpd -S
 #
-# Then:
-#   curl -sI -H 'Host: demo.marvelslice.com' http://127.0.0.1/ | head -1
-#   # want "HTTP/1.1 200 OK" from the container (Server: nginx), not a Webuzo 404.
+# Requires mod_rewrite, mod_proxy and mod_proxy_http, plus
+# AllowOverride FileInfo (Webuzo normally enables it). SELinux hosts also need:
+#   setsebool -P httpd_can_network_connect 1
+#
+# Check modules:
+#   /usr/local/apps/apache/bin/httpd -M | grep -E 'rewrite|proxy'
+#
+# Verify after installing:
+#   curl -fsS http://127.0.0.1:8086/api/health
+#   curl -sI -H 'Host: your-domain.com' http://127.0.0.1/ | head -1
 
 RewriteEngine On
 
-# Our nginx uses `server_name _` and accepts any Host, so this is optional;
-# kept to mirror the lms.marvelslice.com setup on this server.
-RequestHeader set Host "demo.marvelslice.com"
+# Optional: force the Host header. Not needed - the ERP nginx uses
+# `server_name _` and accepts any Host. Uncomment only if your app requires it.
+# RequestHeader set Host "your-domain.com"
 
-# Let ACME/Let's Encrypt challenges reach files on disk instead of the container.
+# Let ACME/Let's Encrypt challenges be served from disk by Apache, not proxied.
+# Keep this or certificate renewals will fail.
 RewriteCond %{REQUEST_URI} !^/\.well-known [NC]
 
-# [P] = proxy (NOT [R], which would redirect the browser to the visitor's own
-# 127.0.0.1). Target = the erp-web container published by docker-compose.
-RewriteRule ^(.*)$ http://127.0.0.1:8083/$1 [P,L]
+# [P] = proxy through mod_proxy. NEVER use [R]: that would redirect the
+# visitor's browser to 127.0.0.1:8086 on their own machine.
+RewriteRule ^(.*)$ http://127.0.0.1:8086/$1 [P,L]

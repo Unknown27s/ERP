@@ -1,0 +1,69 @@
+# ALTERNATIVE deployment: two images (separate API + web containers).
+#
+# This is the original split topology and is kept for teams that prefer to
+# scale/replace the API and web tiers independently. The default
+# `docker-compose.yml` runs the all-in-one image instead.
+#
+# Run one stack or the other, not both: both publish 127.0.0.1:8086, so the same
+# Apache vhost works whichever stack is active.
+#
+#   docker compose -f docker-compose.split.yml up -d --build
+#
+# Topology:
+#   Internet -> Apache/Webuzo :443 -> 127.0.0.1:8086 -> erp-web (nginx)
+#                                                        -> erp-api :4000 -> Supabase
+#
+# Service names stay prefixed (erp-*) and the network is distinct so this stack
+# can coexist with other applications without service-name collisions.
+
+name: erp-split
+
+services:
+  erp-api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: marvel-software/api:latest
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      TZ: ${APP_TIMEZONE:-Asia/Kolkata}
+    expose:
+      - "4000"
+    restart: unless-stopped
+    networks:
+      - erp_split_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  erp-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: marvel-software/web:latest
+    depends_on:
+      erp-api:
+        condition: service_healthy
+    ports:
+      # Loopback only; override with ERP_WEB_PORT in .env if needed.
+      - "127.0.0.1:${ERP_WEB_PORT:-8086}:80"
+    restart: unless-stopped
+    networks:
+      - erp_split_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+networks:
+  erp_split_net:
+    name: erp_split_net
+    driver: bridge

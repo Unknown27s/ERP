@@ -1,56 +1,64 @@
-# Deployment for the MarvelSoftware platform.
+# Production stack for MarvelSoftware ERP — one all-in-one image.
 #
-# Topology (Option B — dedicated port; see deploy/apache/subdomain-vhost.conf):
-#   Internet -> Apache / Webuzo (TLS on 80/443)
-#             -> 127.0.0.1:8083
-#                -> erp-web (nginx: SPA + /api proxy)
-#                   -> erp-api :4000 -> Supabase Cloud (managed Postgres)
+#   Internet -> Apache/Webuzo :443 -> 127.0.0.1:8086 -> erp (nginx :8080 -> API :4000)
 #
-# Service names are prefixed (erp-*) so this stack can also join a shared
-# network without clashing with web/api/postgres/redis there.
+# Server policy for co-hosted applications:
+#   * every application gets its own compose project;
+#   * every application gets its own bridge network (erp_net here);
+#   * every application gets its own loopback-only port (8086-8099 here).
+# This stack uses 8086. Do not reuse that port for another app on the box.
 #
-# Usage:
-#   cp .env.example .env      # DATABASE_URL, JWT_SECRET, SMTP_* …
+# Usage (from the repo root):
+#   cp .env.example .env      # then set DATABASE_URL, JWT_SECRET, SMTP_*
 #   docker compose up -d --build
-#   docker compose logs -f erp-api
+#   docker compose logs -f erp
+#
+# Apache/Webuzo config: deploy/apache/subdomain-vhost.conf
+# Full runbook:         deploy/README.md
+
+name: erp
 
 services:
-  erp-api:
+  erp:
     build:
       context: .
-      dockerfile: server/Dockerfile
-    image: marvel-software/api:latest
+      dockerfile: Dockerfile
+    image: marvel-software/erp:latest
+    container_name: erp
     env_file:
       - .env
     environment:
       NODE_ENV: production
       PORT: "4000"
       TZ: ${APP_TIMEZONE:-Asia/Kolkata}
-    expose:
-      - "4000"
-    # DATABASE_URL points at Supabase Cloud (managed Postgres) over the public
-    # internet, so the container just dials out on 5432 — no host gateway mapping
-    # and no shared Docker network are needed.
-    restart: unless-stopped
-    networks:
-      - app
-
-  erp-web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-    image: marvel-software/web:latest
-    depends_on:
-      erp-api:
-        condition: service_healthy
     ports:
-      # Loopback only. 8083 = first free port after your existing 8080/8081/8082.
-      # Override with WEB_PORT=8090 docker compose up -d if 8083 is taken.
-      - "127.0.0.1:${WEB_PORT:-8083}:80"
+      # Loopback only — never 0.0.0.0. Apache/Webuzo is the public entry point.
+      # Change ERP_PORT in .env if 8086 is already taken on the host.
+      - "127.0.0.1:${ERP_PORT:-8086}:8080"
     restart: unless-stopped
     networks:
-      - app
+      - erp_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
-  app:
+  # A named, application-scoped bridge. Other co-hosted apps must use their own
+  # network name (lms_net, crm_net, …) so DNS/service names can never collide.
+  erp_net:
+    name: erp_net
     driver: bridge
+    # Only pin a subnet if another stack must peer with this one; otherwise let
+    # Docker allocate a free range. If you pin it, pick a range no other stack
+    # uses, e.g.:
+    # ipam:
+    #   config:
+    #     - subnet: 172.31.99.0/24
