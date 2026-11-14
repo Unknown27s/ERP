@@ -29,7 +29,6 @@ This repository currently contains **Phase 0 + Phase 1** in full and **Phase 2**
 ```
 apps/web            React + TypeScript + Vite SPA (permission-aware shell)
 server              Node + Express REST API (the only enforcement point)
-packages/pricing    Pure pricing engine from the legacy build (unused by Phase 1 UI)
 packages/validation Shared Zod schemas
 packages/types      Shared domain types
 supabase/migrations Authoritative Postgres DDL

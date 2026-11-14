@@ -1,6 +1,6 @@
 # Build context for both images is the repo ROOT (see docker-compose.yml):
-# the API needs the monorepo layout for its relative require of packages/pricing
-# and for supabase/migrations. Keep this list tight so the context stays small.
+# the API needs supabase/migrations at boot, and packages/ keeps the npm
+# workspace symlinks valid. Keep this list tight so the context stays small.
 
 .git
 .gitignore

@@ -15,7 +15,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY server/package.json ./server/package.json
-COPY packages/pricing/package.json ./packages/pricing/package.json
 COPY packages/types/package.json ./packages/types/package.json
 COPY packages/validation/package.json ./packages/validation/package.json
 # Full install here (needs typescript + vite devDeps for `tsc --noEmit && vite build`).

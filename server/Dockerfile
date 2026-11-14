@@ -4,8 +4,7 @@
 #
 # There is no build step: `node server/src/index.js` is the whole story. Two
 # monorepo facts shape this file, so don't "simplify" the COPYs away:
-#   1. server/src/services/pricing.js requires ../../../packages/pricing/src/index.js
-#      (a path OUTSIDE the server/ workspace) — so packages/ must ship too.
+#   1. packages/ keeps the npm workspace symlinks valid in the runtime image.
 #   2. server/src/db.js reads supabase/migrations/*_pg.sql at boot — so supabase/
 #      must ship too. Migrations run automatically (idempotent, advisory-locked).
 #
@@ -22,7 +21,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json ./server/package.json
 COPY apps/web/package.json ./apps/web/package.json
-COPY packages/pricing/package.json ./packages/pricing/package.json
 COPY packages/types/package.json ./packages/types/package.json
 COPY packages/validation/package.json ./packages/validation/package.json
 # No native addons (bcryptjs/pg/nodemailer are pure JS) — no build tools needed.

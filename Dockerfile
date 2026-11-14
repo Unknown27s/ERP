@@ -27,7 +27,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY server/package.json ./server/package.json
-COPY packages/pricing/package.json ./packages/pricing/package.json
 COPY packages/types/package.json ./packages/types/package.json
 COPY packages/validation/package.json ./packages/validation/package.json
 RUN npm ci
@@ -48,7 +47,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY server/package.json ./server/package.json
-COPY packages/pricing/package.json ./packages/pricing/package.json
 COPY packages/types/package.json ./packages/types/package.json
 COPY packages/validation/package.json ./packages/validation/package.json
 
@@ -75,9 +73,9 @@ COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 # supervisord keeps both processes alive and forwards their logs to docker logs.
 COPY docker/supervisord.conf /etc/supervisord.conf
 
-# Runtime layout required by the API:
-#   - packages/ is required by server/src/services/pricing.js (relative path)
+# Runtime layout:
 #   - supabase/migrations is read at boot by server/src/db.js
+#   - packages/ keeps the npm workspace symlinks valid
 COPY --from=api-deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server ./server
 COPY --chown=node:node packages ./packages
