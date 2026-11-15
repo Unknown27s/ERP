@@ -35,6 +35,8 @@ import {
   CalendarRange,
   Banknote,
   UsersRound,
+  Target,
+  LifeBuoy,
   Boxes,
   TrendingUp,
   ShieldCheck,
@@ -59,6 +61,9 @@ type DashData = {
   pending_leaves: number | null;
   payroll_net: number | null;
   customers: number | null;
+  open_leads: number | null;
+  overdue_follow_ups: number | null;
+  open_support_cases: number | null;
   active_items: number | null;
   revenue_month: number | null;
   recent_activity: Array<{
@@ -114,12 +119,28 @@ const ACTION_SHORTCUTS = [
     color: 'text-teal-600 bg-teal-50',
   },
   {
+    to: '/admin/crm/leads',
+    label: 'Leads & Pipeline',
+    desc: 'Work enquiries, follow-ups and lead-to-customer conversion.',
+    icon: Target,
+    permission: 'crm.view',
+    color: 'text-blue-600 bg-blue-50',
+  },
+  {
     to: '/admin/customers',
     label: 'Customer Directory',
     desc: 'Manage CRM contacts, interactions, and customer records.',
     icon: UsersRound,
     permission: 'crm.view',
     color: 'text-purple-600 bg-purple-50',
+  },
+  {
+    to: '/admin/crm/support-cases',
+    label: 'Support Cases',
+    desc: 'Track customer issues, priorities and resolution status.',
+    icon: LifeBuoy,
+    permission: 'crm.view',
+    color: 'text-rose-600 bg-rose-50',
   },
 ];
 
@@ -323,6 +344,62 @@ export default function Dashboard() {
                 <CardContent>
                   <div className="text-2xl font-bold text-slate-900 tracking-tight">{d.customers}</div>
                   <p className="text-[11px] text-slate-500 mt-1">Verified CRM contact profiles</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* KPI: Open Leads */}
+            {d.open_leads != null && (
+              <Card className="hover:border-slate-300 transition-all hover:shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Open Leads
+                  </span>
+                  <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+                    <Target className="w-4 h-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-900 tracking-tight">{d.open_leads}</div>
+                  <p className="text-[11px] text-slate-500 mt-1">Enquiries not yet won or lost</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* KPI: Overdue Follow-ups */}
+            {d.overdue_follow_ups != null && (
+              <Card className="hover:border-slate-300 transition-all hover:shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Overdue Follow-ups
+                  </span>
+                  <div className={`p-2 rounded-lg ${d.overdue_follow_ups > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                    <Clock className="w-4 h-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className={`text-2xl font-bold tracking-tight ${d.overdue_follow_ups > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    {d.overdue_follow_ups}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">Leads past their next follow-up date</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* KPI: Open Support Cases */}
+            {d.open_support_cases != null && (
+              <Card className="hover:border-slate-300 transition-all hover:shadow-md">
+                <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Open Support Cases
+                  </span>
+                  <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
+                    <LifeBuoy className="w-4 h-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-amber-600 tracking-tight">{d.open_support_cases}</div>
+                  <p className="text-[11px] text-slate-500 mt-1">Open or pending customer issues</p>
                 </CardContent>
               </Card>
             )}

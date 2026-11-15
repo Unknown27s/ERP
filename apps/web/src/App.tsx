@@ -22,6 +22,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/admin/Dashboard';
 import Staff from './pages/admin/Staff';
 import Customers from './pages/admin/Customers';
+import Leads from './pages/admin/crm/Leads';
+import SupportCases from './pages/admin/crm/SupportCases';
 import Settings from './pages/admin/Settings';
 import AuditLogs from './pages/admin/AuditLogs';
 import ModulePlaceholder from './pages/admin/ModulePlaceholder';
@@ -41,6 +43,8 @@ import {
   CalendarRange,
   Banknote,
   UsersRound,
+  Target,
+  LifeBuoy,
   Boxes,
   Wallet,
   BarChart3,
@@ -325,6 +329,20 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                 CRM &amp; Sales
               </div>
               <NavLink
+                to="/admin/crm/leads"
+                onClick={closeSidebar}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                    isActive
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                  }`
+                }
+              >
+                <Target className="w-4 h-4 shrink-0" />
+                <span>Leads &amp; Pipeline</span>
+              </NavLink>
+              <NavLink
                 to="/admin/customers"
                 onClick={closeSidebar}
                 className={({ isActive }) =>
@@ -337,6 +355,20 @@ function AdminShell({ children }: { children: React.ReactNode }) {
               >
                 <UsersRound className="w-4 h-4 shrink-0" />
                 <span>Customers</span>
+              </NavLink>
+              <NavLink
+                to="/admin/crm/support-cases"
+                onClick={closeSidebar}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                    isActive
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                  }`
+                }
+              >
+                <LifeBuoy className="w-4 h-4 shrink-0" />
+                <span>Support Cases</span>
               </NavLink>
             </div>
           )}
@@ -531,6 +563,9 @@ export default function App() {
               <Route path="/admin/staff/designations" element={<AdminShell><Guard permission="staff.view"><Staff tab="designations" /></Guard></AdminShell>} />
 
               {/* Authenticated Workspace: CRM & Customers */}
+              <Route path="/admin/crm" element={<Navigate to="/admin/crm/leads" replace />} />
+              <Route path="/admin/crm/leads" element={<AdminShell><Guard permission="crm.view"><Leads /></Guard></AdminShell>} />
+              <Route path="/admin/crm/support-cases" element={<AdminShell><Guard permission="crm.view"><SupportCases /></Guard></AdminShell>} />
               <Route path="/admin/customers" element={<AdminShell><Guard permission="crm.view"><Customers mode="view" /></Guard></AdminShell>} />
               <Route path="/admin/customers/new" element={<AdminShell><Guard permission="crm.manage"><Customers mode="new" /></Guard></AdminShell>} />
 

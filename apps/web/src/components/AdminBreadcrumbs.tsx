@@ -20,6 +20,8 @@ const SIMPLE: Record<string, string> = {
   '/admin': 'Overview',
   '/admin/customers': 'Customers',
   '/admin/customers/new': 'New Customer',
+  '/admin/crm/leads': 'Leads & Pipeline',
+  '/admin/crm/support-cases': 'Support Cases',
   '/admin/inventory': 'Inventory & Stock',
   '/admin/finance': 'Finance & Accounting',
   '/admin/reports': 'Reports',

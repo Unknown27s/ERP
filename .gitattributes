@@ -1,0 +1,21 @@
+# Normalise line endings in the repository so a stray editor save on another
+# platform cannot rewrite every line of every file (see commit 9d9b5dd).
+* text=auto eol=lf
+
+# Binary files: never convert, never diff.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+
+# Keep Windows scripts working if any are added later.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf

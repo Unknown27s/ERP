@@ -41,17 +41,18 @@ This file records the choices made while turning the inherited jewellery applica
 - **Lead and case codes** are generated per company (`L00001`, `SC00001`). Because rows are archived and never deleted, codes stay unique.
 - **Owner/assignee** must be an active user in the same company.
 - **Archived records stay out of default lists**; `include_inactive=1|true` returns them.
+- **The SPA mirrors those rules.** The lead form does not offer `won`; the convert dialog collects the postal address; the support-case customer link is read-only after creation because the API does not allow changing it.
 
 ## Scope and flow
 
 - **Phase order is respected.** Phase 0/1 delivers setup, auth, roles, settings, departments, designations and audit. Finance and Inventory show an honest placeholder with the planned scope instead of fake KPIs.
 - **Inherited modules kept working:** HR (employees, attendance, payroll), Leave and Customers remain available under permission gates. They are intentionally generic and reusable in later phases.
-- **Inherited jewellery screens are no longer routed** (Landing, Catalogue, Product Detail, Billing, Rates, Barcodes, old Inventory, old Reports, Campaigns, Email settings). Their files remain in `apps/web/src/pages` so nothing is lost; deleting them is a later cleanup, after confirming no component imports them.
+- **Inherited jewellery screens are no longer routed.** The old Landing, Catalogue, Product Detail, Billing, Rates, Barcodes, Inventory and Reports pages were removed from the SPA in the rebrand commit and remain available in git history.
 - **Internal workspace package names** (`gold-shop-platform` root has been renamed to `marvel-software`, but `@gold-shop/pricing`, `@gold-shop/types`, `@gold-shop/validation` remain) are not user-visible. Renaming them is deferred to avoid a lockfile/node_modules churn in the same change.
 - **Email** defaults to a generic sender name. SMTP settings are environment-based and are not part of Phase 1 UI. `MAIL_DISABLED=true` suppresses all sends in tests.
 - **Postgres only.** No `.env` or database is committed. Migrations `0001`–`0010` are applied automatically on boot and by `npm run migrate`.
 - **One in-process scheduler** starts only on a real server boot. It sends approved campaigns whose `schedule_at` has arrived. Tests never start it.
-- **The frontend is a separate workstream.** Backend changes are documented in `docs/current-state.md` with endpoint and payload notes for the frontend agent.
+- **The CRM screens are part of this workstream now.** Leads, follow-up activities, support cases and the related dashboard counters are routed in `apps/web`. Backend changes are still documented in `docs/current-state.md`.
 
 ## Open questions for the owner
 

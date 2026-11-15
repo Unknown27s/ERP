@@ -3,20 +3,21 @@
 > **Purpose.** This is the working record the product owner asked for: what
 > works, what is pending, what was changed beyond the explicit request, what is
 > blocked, and what needs a decision. Update it at the end of every work
-> session, especially while the frontend is being changed by a separate agent.
+> session.
 >
-> **Last updated:** 2026-11-12 (Phase 2 backend + permission/tenant hardening)
-> **Scope of this entry:** Phase 2 — CRM pipeline, granular permissions cleanup,
-> dashboard counters, migrations, tests, documentation, and the hardening pass
-> recorded in §14.
+> **Last updated:** 2026-11-15 (Phase 2 CRM frontend)
+> **Scope of this entry:** Phase 2 — CRM pipeline screens (leads, follow-up
+> activities, support cases), dashboard CRM counters, routes/navigation, and the
+> static verification recorded in §3. Backend hardening from the previous entry
+> remains in §14.
 
 ## 0. Working agreements from the owner
 
 - **Do not run API/server tests without asking first.** Test runs are paused
   until the owner approves. Static checks (`node --check`, TypeScript) are fine.
-- **The frontend is owned by another agent.** Do not edit `apps/web` unless the
-  owner explicitly asks for a specific change. When such a change is requested,
-  make the smallest possible edit and record it here.
+- **The frontend is now in scope.** The owner asked this workstream to build the
+  missing Phase 2 CRM screens after the backend was complete. Frontend edits are
+  limited to the CRM shell, routes and Phase 2 screens recorded in §3.
 - **Record unrequested changes and blockers in this file.**
 
 ---
@@ -31,9 +32,9 @@
 | HR — employees, attendance, salary, payroll | **Working** | **Working** | Phase 2 scope present; statutory outputs not built |
 | Leave — types, balances, requests, approvals, holidays | **Working** | **Working** | Company-wide visibility (self-service scoping is an open question) |
 | CRM — customers, phone lookup, occasions | **Working** | **Working** | Inherited Phase 2 base |
-| CRM — leads / pipeline | **Working** | **Pending (frontend agent)** | New in this session (`/leads`, `/crm/pipeline`) |
-| CRM — follow-up activities | **Working** | **Pending (frontend agent)** | New in this session (`/activities`) |
-| CRM — support cases | **Working** | **Pending (frontend agent)** | New in this session (`/support-cases`) |
+| CRM — leads / pipeline | **Working** | **Working** | Board + table screens (`/admin/crm/leads`) |
+| CRM — follow-up activities | **Working** | **Working** | Add/complete/reopen/archive from the lead panel |
+| CRM — support cases | **Working** | **Working** | List + detail (`/admin/crm/support-cases`) |
 | Finance | Placeholder | Placeholder | Phase 3 |
 | Inventory | Placeholder | Placeholder | Phase 4 |
 | Reports / email | Partial | Placeholder | Read APIs exist; UI still Phase 7 placeholders |
@@ -123,22 +124,45 @@ Verification results are in §6.
 
 ---
 
-## 3. Frontend handoff (another agent owns `apps/web`)
+## 3. Phase 2 frontend delivered
 
-**Do not edit frontend files in this workstream unless explicitly asked.**
-The frontend changes frequently. The Phase 2 backend is ready for these screens:
+The owner moved frontend work into this workstream. The following screens are
+now routed in the SPA and call the existing API:
 
-- **Leads pipeline** — board or table using `GET /leads`, stage changes via
-  `PATCH /leads/:id`, convert dialog via `POST /leads/:id/convert` (must collect
-  `address_line1`, `city`, `state`, `postal_code`).
-- **Lead detail** — lead fields + `GET /leads/:id` activities, with
-  `POST/PATCH /activities` for follow-ups.
-- **Support cases** — list/detail using `/support-cases`, status/priority
-  controls, assignee picker from `/staff/users`.
-- **Overview** — optional CRM counters from `/dashboard` or `/crm/pipeline`.
+| Screen | Route | Files | What it does |
+|---|---|---|---|
+| Leads & pipeline | `/admin/crm/leads` | `pages/admin/crm/Leads.tsx`, `crm/crmUi.tsx` | Board and table views, filters (text, stage, follow-up window, owner, archived), create/edit, archive |
+| Lead detail | modal from the list | `pages/admin/crm/Leads.tsx` | Contact/notes, stage changes, follow-up list, add/complete/reopen/archive activities, lead → customer conversion |
+| Support cases | `/admin/crm/support-cases` | `pages/admin/crm/SupportCases.tsx` | Status/priority KPIs, filters, create/edit, status and priority changes, assignee, archive |
+| Overview | `/admin` | `pages/admin/Dashboard.tsx` | Added open leads, overdue follow-ups and open support cases KPIs plus CRM launchpad shortcuts |
 
-Suggested permission wiring (UI convenience only; the API is authoritative):
-`crm.view` shows CRM screens, `crm.manage` shows create/edit/convert controls.
+Shared behaviour:
+
+- Navigation lives in the existing sidebar under **CRM & Sales**, with tab
+  links for pipeline, customers and support cases on each CRM page.
+- Writes render only when `can('crm.manage')`; every route is still guarded by
+  `crm.view` and the server enforces the same permission.
+- Owner/assignee pickers call `/staff/users` and hide themselves on `403`, so a
+  Sales user without `staff.view` can still work the pipeline.
+- “Won” is not offered as a stage in the lead form. It is reached only through
+  the conversion dialog, which collects the required postal address.
+- Archived records are hidden by default and exposed with **Include archived**.
+- The support-case customer link is fixed after creation because the API does
+  not allow changing `customer_id` on `PATCH`.
+
+Remaining frontend gaps (recorded, not blocking Phase 2):
+
+1. The customer directory has no deep link to a single customer, so the
+   converted-customer banner links to the list rather than the record.
+2. Campaigns, offers and occasions still have no CRM screens; they remain API
+   only.
+3. The API has no follow-up reminder endpoint; the dashboard shows overdue
+   counts, not notifications.
+4. Charts are not used — the pipeline is a board, which is honest for the
+   current data volume.
+
+Permission wiring (UI convenience only; the API is authoritative): `crm.view`
+shows CRM screens, `crm.manage` shows create/edit/convert controls.
 
 ---
 
@@ -178,29 +202,33 @@ Suggested permission wiring (UI convenience only; the API is authoritative):
 
 ## 6. Verification log
 
-Commands run and results (2026-11-12). **API tests are now paused at the
-owner's request; nothing below was run after that instruction.**
+Commands run and results. The owner approved one Phase 2 test run on
+2026-11-15; the full suite is still paused.
 
 ```text
 npm run migrate                                  # applied 0010_crm_pipeline_pg.sql
-npm run test -w server -- test/phase2.test.js    # 6/6 pass (BEFORE dashboard counters and hardening)
+npm run test -w server -- test/phase2.test.js    # 7/7 pass (2026-11-15, after hardening)
 node --check server/src/routes/crm-pipeline.js   # passed
 node --check server/src/routes/crm.js            # passed
 node --check server/src/**/*.js                  # 31/31 files pass (after hardening)
-npx tsc --noEmit -p apps/web/tsconfig.json       # passed (earlier, before the Dashboard copy removal)
+npx tsc --noEmit -p apps/web/tsconfig.json       # passed (2026-11-15, after the CRM screens)
+npm run build -w web                             # passed, 2423 modules (2026-11-15)
 ```
 
-**Not yet verified (needs owner approval to run API tests):**
+The first approval run found one failure, and it was a test bug, not a product
+bug: the email and occasions routers have always been mounted under
+`/api/admin`, so the test's `/email/settings` and `/festivals` calls returned
+404 before any permission check. Both paths were corrected to
+`/admin/email/settings` and `/admin/festivals`. `README.md` now lists the
+mounted paths explicitly. The second run passed 7/7, confirming the dashboard
+counters, granular permission mapping and tenant isolation.
 
-- `/dashboard` now returns `open_leads`, `overdue_follow_ups` and
-  `open_support_cases`. The phase-2 test gained assertions for these fields, but
-  that updated test has not been executed.
+**Not yet verified:**
+
 - The full server suite has **not** been run since the Phase 2 files were added.
   The earlier 28/28 result belongs to the pre-Phase-2 suite.
-- The Dashboard copy removal has not been rebuilt/type-checked; it was a
-  self-contained card deletion plus one unused icon import.
-
-Record the failing test and likely cause here once the owner approves a run.
+- The new CRM screens are type-checked, built and backed by a passing API suite,
+  but have not been exercised in a browser against a logged-in session.
 
 
 ---
@@ -274,8 +302,8 @@ Why it is risky here:
 - Deployment is a single Docker Compose app. Prisma adds `prisma generate`,
   engine binaries and platform-specific build steps to both the API image and
   CI.
-- The frontend is being actively changed by another agent; a backend-wide data
-  layer rewrite at the same time raises avoidable merge/verification risk.
+- The SPA and API ship together, and a backend-wide data layer rewrite would
+  enlarge an already large verification surface without improving correctness.
 
 Safe ways to use Prisma without the rewrite:
 
@@ -301,9 +329,10 @@ Until the owner chooses option 3, the authoritative schema remains
 
 ## 9. Open questions / blockers
 
-1. **Logo file is still missing.** Save the supplied image as
-   `apps/web/public/logo.png` (favicon uses the same file).
-2. **CRM UI is pending** and owned by the frontend agent (§3).
+1. ~~**Logo file is still missing.**~~ **Resolved.** `apps/web/public/logo.avif`
+   is committed and `BrandMark` falls back to `/logo.png` then a monogram.
+2. ~~**CRM UI is pending.**~~ **Delivered in §3.** The remaining gap is a
+   customer detail deep link; the converted-customer banner opens the list.
 3. **Employee self-service scoping:** should an Employee see only their own
    HR/leave/payslip records? Currently `hr.view`/`leave.view` are company-wide.
 4. **Statutory payroll outputs:** PF/ESI/PT/TDS returns, Form 16, salary
@@ -318,22 +347,19 @@ Until the owner chooses option 3, the authoritative schema remains
    the full migration in §8.
 9. **Logo aspect ratio:** the monogram fallback assumes a square tile; a wide
    wordmark may need a different sidebar treatment once the file is available.
-10. **Test approval:** phase-2 tests passed before the dashboard-counter change;
-    the updated suite needs the owner's go-ahead to run.
+10. **Test approval:** the Phase 2 suite now passes 7/7 (2026-11-15). The full
+    server suite still needs the owner's go-ahead to run.
 
 ---
 
 ## 10. Known gaps (honest list)
 
-- No CRM UI for leads/activities/cases yet.
-- No lead import, bulk reassignment, dedupe/merge, attachments, or email/WhatsApp
-  logging from activities.
+- Lead import, bulk reassignment, dedupe/merge, attachments, and email/WhatsApp
+  logging from activities are not built.
 - No notifications for due follow-ups or SLA breaches (counts only).
 - HR/leave are company-wide; no self-service scoping.
 - Finance and Inventory remain placeholders.
 - No GST filing or statutory payroll returns.
-- No commits made; working tree includes both this workstream and frontend
-  agent changes.
 
 ---
 
@@ -341,6 +367,9 @@ Until the owner chooses option 3, the authoritative schema remains
 
 | Date | Change |
 |---|---|
+| 2026-11-15 | Phase 2 CRM frontend: leads board/table, lead detail + follow-ups, conversion dialog, support cases, dashboard CRM KPIs (§3) |
+| 2026-11-15 | Ran the Phase 2 suite with owner approval; fixed two wrong test paths under `/api/admin`; 7/7 pass (§6) |
+| 2026-11-12 | Pulled deploy/Docker changes from `origin/main`; no backend code changed |
 | 2026-11-12 | Hardening: all legacy guards converted, tenant-scoping holes fixed, supplier audit, campaign scheduler started (§14) |
 | 2026-11-12 | Backend audit + open-source comparison recorded (§12, §13); no code changed |
 | 2026-11-12 | Removed the "System Architecture Overview" promo card from the dashboard (owner request) |
@@ -420,7 +449,7 @@ pricing estimate, suppliers, purchases.
 | Errors | `express-async-errors` + one JSON error handler |
 | Email | `nodemailer` |
 | Tests | Node's built-in `node:test` runner |
-| Frontend | React + TypeScript + Vite + Tailwind + Radix (separate agent) |
+| Frontend | React + TypeScript + Vite + Tailwind + Radix |
 
 Dependencies that are declared but **not used by the backend**: `zod`
 (installed, zero imports) and `vite` (a frontend/build tool, wrongly listed as
@@ -451,8 +480,8 @@ is a small, safe cleanup.
 8. **Document numbers use row counts** (`nextCode`) in Phase 2 and a
    `LIKE`-ordered scan for invoices. Concurrent creates can race unless every
    path takes a lock.
-9. **No OpenAPI/contract file.** The frontend agent relies on reading route
-   code; there is no generated client or type contract.
+9. **No OpenAPI/contract file.** The SPA relies on reading route code; there is
+   no generated client or type contract.
 10. **No structured logging or request ids** beyond the error handler's
     synthetic `correlationId`.
 
@@ -649,7 +678,7 @@ node --check server/src/index.js               # ok
 1. Shared validation middleware using the installed-but-unused `zod`.
 2. `document_series` table with row locking for lead/case/invoice numbers.
 3. Idempotency keys on finalize / pay / convert.
-4. OpenAPI contract for the frontend agent.
+4. OpenAPI contract for the SPA.
 5. A rule for follow-up reminders (the campaign scheduler exists; follow-ups
    are still count-only).
 6. Optional: Postgres RLS as a backstop for tenant scoping.
