@@ -8,6 +8,7 @@ export type User = {
   role_id?: string | null;
   role_name?: string;
   display_name: string;
+  avatar_url?: string | null;
   shop_id: string;
   permissions?: string[];
 };
@@ -18,10 +19,11 @@ type CtxValue = {
   login: (e: string, p: string) => Promise<void>;
   logout: () => void;
   can: (permission: string) => boolean;
+  refreshUser: () => Promise<void>;
 };
 
 const Ctx = createContext<CtxValue>({
-  user: null, loading: true, login: async () => {}, logout: () => {}, can: () => false,
+  user: null, loading: true, login: async () => {}, logout: () => {}, can: () => false, refreshUser: async () => {},
 });
 
 export const useAuth = () => useContext(Ctx);
@@ -37,12 +39,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchMe = async () => {
+    try {
+      const r = await api.get('/auth/me');
+      setUser(r.user);
+    } catch {
+      setToken('');
+      setUser(null);
+    }
+  };
+
   useEffect(() => {
     if (!token()) { setLoading(false); return; }
-    api.get('/auth/me')
-      .then((r) => setUser(r.user))
-      .catch(() => setToken(''))
-      .finally(() => setLoading(false));
+    fetchMe().finally(() => setLoading(false));
   }, []);
 
   const login = async (email: string, password: string) => {
@@ -60,5 +69,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const canFn = (permission: string) => can(user, permission);
 
-  return <Ctx.Provider value={{ user, loading, login, logout, can: canFn }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, loading, login, logout, can: canFn, refreshUser: fetchMe }}>{children}</Ctx.Provider>;
 }

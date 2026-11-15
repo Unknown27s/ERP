@@ -15,6 +15,7 @@
 const express = require('express');
 const { get, all, run, withTransaction, uid } = require('../db');
 const { auth, requirePermission, audit } = require('../middleware/auth');
+const { hasPermission } = require('../services/rbac');
 const { today } = require('../services/date');
 
 const router = express.Router();
@@ -190,6 +191,17 @@ router.get('/employees', requirePermission('hr.view'), async (req, res) => {
      LEFT JOIN employees m ON m.id = e.manager_id
      WHERE ${conds.join(' AND ')}
      ORDER BY (e.status = 'active') DESC, e.full_name`, ...args);
+
+  const canSeeSensitive = hasPermission(req.user.permissions, 'hr.manage') || hasPermission(req.user.permissions, 'payroll.view');
+  if (!canSeeSensitive) {
+    for (const r of rows) {
+      delete r.bank_account;
+      delete r.bank_ifsc;
+      delete r.pan;
+      delete r.dob;
+      delete r.address;
+    }
+  }
   res.json({ data: rows });
 });
 
@@ -204,9 +216,23 @@ router.get('/employees/:id', requirePermission('hr.view'), async (req, res) => {
      LEFT JOIN employees m ON m.id = e.manager_id
      WHERE e.id = ? AND e.shop_id = ?`, req.params.id, req.user.shop_id);
   if (!row) return res.status(404).json({ error: 'not_found' });
-  const salary = await all(
-    'SELECT * FROM salary_structures WHERE employee_id = ? AND shop_id = ? ORDER BY effective_from DESC',
-    row.id, req.user.shop_id);
+
+  const canSeeSensitive = hasPermission(req.user.permissions, 'hr.manage') || hasPermission(req.user.permissions, 'payroll.view');
+  const canSeePayroll = hasPermission(req.user.permissions, 'payroll.view');
+
+  if (!canSeeSensitive) {
+    delete row.bank_account;
+    delete row.bank_ifsc;
+    delete row.pan;
+    delete row.dob;
+    delete row.address;
+  }
+
+  const salary = canSeePayroll
+    ? await all(
+        'SELECT * FROM salary_structures WHERE employee_id = ? AND shop_id = ? ORDER BY effective_from DESC',
+        row.id, req.user.shop_id)
+    : [];
   res.json({ data: { ...row, salary_structures: salary } });
 });
 

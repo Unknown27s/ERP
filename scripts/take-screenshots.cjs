@@ -5,7 +5,9 @@ const http = require('http');
 
 async function login() {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify({ email: 'admin@marvelsoftware.local', password: 'Admin@123' });
+    const email = process.env.DEMO_ADMIN_EMAIL || 'admin@marvelsoftware.local';
+    const password = process.env.DEMO_ADMIN_PASSWORD || 'Admin@123';
+    const data = JSON.stringify({ email, password });
     const req = http.request(
       {
         hostname: 'localhost',

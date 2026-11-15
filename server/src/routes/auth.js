@@ -19,6 +19,7 @@ async function publicUser(row) {
     role_id: row.role_id,
     role_name: role ? role.name : (row.role === 'admin' ? 'Administrator' : 'Sales'),
     display_name: row.display_name,
+    avatar_url: row.avatar_url || null,
     shop_id: row.shop_id,
     permissions: await permissionsForProfile(row),
   };
@@ -29,17 +30,22 @@ router.post('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }), async (r
   if (!email || !password) return res.status(400).json({ error: 'bad_request', message: 'email + password required' });
   const row = await get('SELECT * FROM profiles WHERE email = ? AND active = 1', String(email).toLowerCase());
   if (!row || !bcrypt.compareSync(String(password), row.password_hash)) {
+    // Audit failed login attempt (M1)
+    await audit(row ? row.user_id : null, 'auth.login.failed', 'profile', row ? row.user_id : null,
+      `Failed login attempt for ${String(email).toLowerCase()}`, null, row ? row.shop_id : null, req.ip);
     return res.status(401).json({ error: 'invalid_credentials', message: 'Invalid email or password' });
   }
   await run(`UPDATE profiles SET last_login_at = ${nowFn()} WHERE user_id = ?`, row.user_id);
   const token = sign(row);
-  await audit(row.user_id, 'auth.login', 'profile', row.user_id, `login ${row.email}`);
+  await audit(row.user_id, 'auth.login', 'profile', row.user_id, `login ${row.email}`, null, row.shop_id, req.ip);
   res.json({ token, user: await publicUser(row) });
 });
 
 router.get('/me', auth, (req, res) => res.json({ user: req.user }));
 router.post('/logout', auth, async (req, res) => {
-  await audit(req.user.user_id, 'auth.logout', 'profile', req.user.user_id, 'logout');
+  // Invalidate tokens by incrementing token_version (H2)
+  await run('UPDATE profiles SET token_version = token_version + 1 WHERE user_id = ?', req.user.user_id);
+  await audit(req.user.user_id, 'auth.logout', 'profile', req.user.user_id, 'logout', null, req.user.shop_id, req.ip);
   res.json({ ok: true });
 });
 

@@ -26,11 +26,12 @@
 
 | Area | Backend | UI | Notes |
 |---|---|---|---|
-| Platform, auth, RBAC, audit | **Working** | **Working** | Phase 0/1; permissions enforced server-side |
+| Platform, auth, RBAC, audit | **Working** | **Working** | Phase 0/1; permissions enforced server-side; multi-role + canonical codes seeded |
+| Employee Self-Service (ESS) | **Working** | **Working** | Profile with picture, clock in/out, task log with tags, ESS leave, payslips, reports |
 | Company settings / branding | **Working** | **Working** | Runtime product name via `/api/config` |
 | Staff, departments, designations | **Working** | **Working** | Soft-deactivated, never hard-deleted |
 | HR — employees, attendance, salary, payroll | **Working** | **Working** | Phase 2 scope present; statutory outputs not built |
-| Leave — types, balances, requests, approvals, holidays | **Working** | **Working** | Company-wide visibility (self-service scoping is an open question) |
+| Leave — types, balances, requests, approvals, holidays | **Working** | **Working** | Admin + ESS leave application and self-cancel |
 | CRM — customers, phone lookup, occasions | **Working** | **Working** | Inherited Phase 2 base |
 | CRM — leads / pipeline | **Working** | **Working** | Board + table screens (`/admin/crm/leads`) |
 | CRM — follow-up activities | **Working** | **Working** | Add/complete/reopen/archive from the lead panel |
@@ -367,6 +368,8 @@ Until the owner chooses option 3, the authoritative schema remains
 
 | Date | Change |
 |---|---|
+| 2026-11-15 | Security Hardening: Fixed C1 (removed production demo login prefill, DEV-gated), C2 (fail-closed on JWT_SECRET), C3 (redacted PII & salaries from hr.view, revoked hr.view from default Employee), H1 (removed ?token= query auth), H2 (token_version revocation on logout), H3/H5 (Helmet headers + strict CORS allowed-origins), H4 (trust proxy + IP/email rate-limit), H6 (attendance DO NOTHING, task soft-delete, unverified email linking removed), H7 (configurable strict TLS), M1 (audit failed logins + shop_id/ip metadata), M2 (roles.manage privilege escalation blocked), M4 (CRM webhook validation & secret), M7 (morgan query string PII redaction), M8 (test NODE_ENV guard), M9 (user_roles multi-role RBAC evaluation) |
+| 2026-11-15 | Employee Self-Service (ESS), Tasks Tracking & Visual Reports: Migration 0011, /api/employee/* endpoints, profile photo upload, daily clock in/out sessions, task completion log with category tags, ESS leave balance & apply, payslips view/PDF, Recharts trend charts, and PDF/CSV export |
 | 2026-11-15 | Phase 2 CRM frontend: leads board/table, lead detail + follow-ups, conversion dialog, support cases, dashboard CRM KPIs (§3) |
 | 2026-11-15 | Ran the Phase 2 suite with owner approval; fixed two wrong test paths under `/api/admin`; 7/7 pass (§6) |
 | 2026-11-12 | Pulled deploy/Docker changes from `origin/main`; no backend code changed |

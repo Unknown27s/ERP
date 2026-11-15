@@ -31,6 +31,7 @@ import HREmployees from './pages/admin/hr/Employees';
 import HRAttendance from './pages/admin/hr/Attendance';
 import HRLeaves from './pages/admin/hr/Leaves';
 import HRPayroll from './pages/admin/hr/Payroll';
+import EmployeePortal from './pages/employee/EmployeePortal';
 import AdminBreadcrumbs from './components/AdminBreadcrumbs';
 import {
   LayoutDashboard,
@@ -54,6 +55,8 @@ import {
   X,
   LogOut,
   Search,
+  User,
+  CheckCircle2,
 } from 'lucide-react';
 
 const qc = new QueryClient();
@@ -180,6 +183,85 @@ function AdminShell({ children }: { children: React.ReactNode }) {
             >
               <LayoutDashboard className="w-4 h-4 shrink-0" />
               <span>Overview</span>
+            </NavLink>
+          </div>
+
+          {/* Section: My Self-Service (Baseline Employee Access) */}
+          <div className="space-y-1">
+            <div className="px-3 text-[10px] font-bold uppercase tracking-wider text-brand-400 mb-1.5 flex items-center justify-between">
+              <span>My Workspace</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-400" />
+            </div>
+            <NavLink
+              to="/employee"
+              end
+              onClick={closeSidebar}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                }`
+              }
+            >
+              <User className="w-4 h-4 shrink-0 text-brand-400" />
+              <span>My Profile</span>
+            </NavLink>
+            <NavLink
+              to="/employee/tasks"
+              onClick={closeSidebar}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                }`
+              }
+            >
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>My Tasks &amp; Log</span>
+            </NavLink>
+            <NavLink
+              to="/employee/leaves"
+              onClick={closeSidebar}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                }`
+              }
+            >
+              <CalendarRange className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>My Leaves</span>
+            </NavLink>
+            <NavLink
+              to="/employee/payslips"
+              onClick={closeSidebar}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                }`
+              }
+            >
+              <Banknote className="w-4 h-4 shrink-0 text-teal-400" />
+              <span>My Payslips</span>
+            </NavLink>
+            <NavLink
+              to="/employee/reports"
+              onClick={closeSidebar}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                }`
+              }
+            >
+              <BarChart3 className="w-4 h-4 shrink-0 text-indigo-400" />
+              <span>My Reports</span>
             </NavLink>
           </div>
 
@@ -471,11 +553,21 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         {/* 2.4 User Profile & Sign Out Footer */}
         <div className="p-3 border-t border-slate-800/80 bg-slate-900/40">
           <div className="flex items-center gap-3 p-2 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-            <div className="w-9 h-9 rounded-lg bg-brand-600/20 text-brand-400 border border-brand-500/30 flex items-center justify-center font-bold text-xs shrink-0">
-              {initials}
-            </div>
+            <Link
+              to="/employee"
+              title="View My Profile"
+              className="w-9 h-9 rounded-lg bg-brand-600/20 text-brand-400 border border-brand-500/30 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden hover:opacity-90 transition-opacity"
+            >
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt={user.display_name} className="w-full h-full object-cover" />
+              ) : (
+                initials
+              )}
+            </Link>
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold text-white truncate">{user.display_name}</div>
+              <Link to="/employee" className="text-xs font-semibold text-white truncate block hover:text-brand-400 transition-colors">
+                {user.display_name}
+              </Link>
               <div className="text-[11px] text-slate-400 truncate">{user.role_name || user.role}</div>
             </div>
             <button
@@ -521,13 +613,18 @@ function AdminShell({ children }: { children: React.ReactNode }) {
               <span>{user.role_name || user.role}</span>
             </div>
 
-            {/* User Initials Avatar */}
-            <div
-              className="w-8 h-8 rounded-full bg-brand-600 text-white font-bold text-xs flex items-center justify-center shadow-sm"
-              title={user.display_name}
+            {/* User Avatar with Picture Support */}
+            <Link
+              to="/employee"
+              className="w-8 h-8 rounded-full bg-brand-600 text-white font-bold text-xs flex items-center justify-center shadow-sm overflow-hidden hover:ring-2 hover:ring-brand-500 transition-all"
+              title={`${user.display_name} (My Profile)`}
             >
-              {initials}
-            </div>
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt={user.display_name} className="w-full h-full object-cover" />
+              ) : (
+                initials
+              )}
+            </Link>
           </div>
         </header>
 
@@ -552,6 +649,14 @@ export default function App() {
 
               {/* Public Authentication Screen */}
               <Route path="/login" element={<Login />} />
+
+              {/* Employee Self-Service (ESS) Routes (Baseline Access) */}
+              <Route path="/employee" element={<AdminShell><EmployeePortal initialTab="profile" /></AdminShell>} />
+              <Route path="/employee/profile" element={<Navigate to="/employee" replace />} />
+              <Route path="/employee/tasks" element={<AdminShell><EmployeePortal initialTab="tasks" /></AdminShell>} />
+              <Route path="/employee/leaves" element={<AdminShell><EmployeePortal initialTab="leaves" /></AdminShell>} />
+              <Route path="/employee/payslips" element={<AdminShell><EmployeePortal initialTab="payslips" /></AdminShell>} />
+              <Route path="/employee/reports" element={<AdminShell><EmployeePortal initialTab="reports" /></AdminShell>} />
 
               {/* Authenticated Workspace: Executive Dashboard */}
               <Route path="/admin" element={<AdminShell><Dashboard /></AdminShell>} />

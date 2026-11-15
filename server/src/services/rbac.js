@@ -80,8 +80,8 @@ const DEFAULT_ROLES = [
   },
   {
     name: 'Employee',
-    description: 'Self-service: own details and leave requests',
-    permissions: ['leave.view', 'hr.view'],
+    description: 'Self-service: own details, tasks, and leave requests',
+    permissions: ['leave.view'],
   },
 ];
 
@@ -126,13 +126,31 @@ async function ensureRbac(shopId) {
 async function permissionsForProfile(profile) {
   // Legacy superuser rows keep working even before the seed runs.
   if (profile.role === 'admin') return ['*'];
-  if (profile.role_id) {
+
+  const roleIds = [];
+  if (profile.role_id) roleIds.push(profile.role_id);
+
+  // Union roles from user_roles junction table (Migration 0011)
+  try {
+    const userRoleRows = await all(
+      `SELECT ur.role_id FROM user_roles ur
+       JOIN roles r ON r.id = ur.role_id
+       WHERE ur.user_id = ? AND r.active = 1`,
+      profile.user_id
+    );
+    for (const ur of userRoleRows) {
+      if (!roleIds.includes(ur.role_id)) roleIds.push(ur.role_id);
+    }
+  } catch { /* if user_roles table is being migrated, fallback gracefully */ }
+
+  if (roleIds.length > 0) {
+    const placeholders = roleIds.map(() => '?').join(',');
     const rows = await all(
-      `SELECT rp.permission_key
+      `SELECT DISTINCT rp.permission_key
        FROM role_permissions rp
        JOIN roles r ON r.id = rp.role_id
-       WHERE rp.role_id = ? AND r.active = 1`,
-      profile.role_id
+       WHERE rp.role_id IN (${placeholders}) AND r.active = 1`,
+      ...roleIds
     );
     return rows.map((r) => r.permission_key);
   }

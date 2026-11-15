@@ -226,12 +226,28 @@ router.post('/campaigns/:id/remind', requirePermission('crm.manage'), async (req
   res.json({ data });
 });
 router.post('/webhooks/messaging-provider', async (req, res) => {
-  // Verify signature in production; dedupe by provider_message_id (§9).
-  const { provider_message_id, status } = req.body || {};
-  if (provider_message_id) {
-    await run(`UPDATE campaign_recipients SET status=?, delivered_at=CASE WHEN ?='delivered' THEN ${nowFn()} ELSE delivered_at END WHERE provider_message_id=?`,
-      status || 'delivered', status || 'delivered', provider_message_id);
+  // Fix M4: Verify webhook signature/secret and validate status enum
+  const secret = process.env.WEBHOOK_SECRET;
+  if (secret && req.headers['x-webhook-secret'] !== secret) {
+    return res.status(401).json({ error: 'unauthorized', message: 'Invalid webhook signature' });
   }
+
+  const { provider_message_id, status } = req.body || {};
+  const ALLOWED_STATUS = ['sent', 'delivered', 'failed', 'bounced', 'opened', 'clicked'];
+  if (!provider_message_id || typeof provider_message_id !== 'string') {
+    return res.status(400).json({ error: 'bad_request', message: 'provider_message_id required' });
+  }
+  const cleanStatus = String(status || '').toLowerCase().trim();
+  if (!ALLOWED_STATUS.includes(cleanStatus)) {
+    return res.status(400).json({ error: 'bad_request', message: 'invalid recipient delivery status' });
+  }
+
+  await run(
+    `UPDATE campaign_recipients
+     SET status = ?, delivered_at = CASE WHEN ? = 'delivered' THEN ${nowFn()} ELSE delivered_at END
+     WHERE provider_message_id = ?`,
+    cleanStatus, cleanStatus, provider_message_id
+  );
   res.json({ ok: true });
 });
 

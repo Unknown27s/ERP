@@ -219,6 +219,17 @@ router.put('/roles/:id/permissions', requirePermission('roles.manage'), async (r
   const unknown = keys.filter((k) => !ALLOWED_PERMISSIONS.has(k));
   if (unknown.length) return bad(res, `unknown permission(s): ${unknown.join(', ')}`);
 
+  // Fix M2: Prevent privilege escalation — caller cannot grant permissions they do not possess
+  if (req.user.role !== 'admin' && !req.user.permissions?.includes('*')) {
+    const unheld = keys.filter((k) => !req.user.permissions?.includes(k));
+    if (unheld.length) {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: `Privilege escalation blocked: you cannot grant permissions you do not hold: ${unheld.join(', ')}`,
+      });
+    }
+  }
+
   await run('DELETE FROM role_permissions WHERE role_id = ?', cur.id);
   for (const key of [...new Set(keys)]) {
     await run('INSERT INTO role_permissions (role_id, permission_key) VALUES (?,?) ON CONFLICT DO NOTHING', cur.id, key);

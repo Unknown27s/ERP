@@ -2,20 +2,35 @@ const jwt = require('jsonwebtoken');
 const { get, run, uid } = require('../db');
 const { permissionsForProfile, hasPermission } = require('../services/rbac');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me-please-32chars';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error('[FATAL] JWT_SECRET must be set in environment and contain at least 32 characters. Refusing to run in insecure mode.');
+}
 
 function sign(user) {
-  return jwt.sign({ sub: user.user_id, role: user.role, shop_id: user.shop_id, email: user.email }, JWT_SECRET, { expiresIn: '12h' });
+  return jwt.sign(
+    { sub: user.user_id, role: user.role, shop_id: user.shop_id, email: user.email, tv: user.token_version || 1 },
+    JWT_SECRET,
+    { expiresIn: '12h' }
+  );
 }
 
 async function auth(req, res, next) {
   try {
     const hdr = req.headers.authorization || '';
-    const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : (req.query.token || null);
-    if (!token) return res.status(401).json({ error: 'unauthenticated', message: 'Missing bearer token' });
+    if (!hdr.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'unauthenticated', message: 'Missing or malformed Bearer authorization token' });
+    }
+    const token = hdr.slice(7);
     const payload = jwt.verify(token, JWT_SECRET);
     const row = await get('SELECT * FROM profiles WHERE user_id = ? AND active = 1', payload.sub);
     if (!row) return res.status(401).json({ error: 'unauthenticated', message: 'User disabled' });
+
+    // Enforce token revocation (H2)
+    if (payload.tv && row.token_version && payload.tv !== row.token_version) {
+      return res.status(401).json({ error: 'unauthenticated', message: 'Session revoked. Please sign in again.' });
+    }
+
     const permissions = await permissionsForProfile(row);
     const role = row.role_id
       ? await get('SELECT id, name FROM roles WHERE id = ?', row.role_id)
@@ -28,6 +43,7 @@ async function auth(req, res, next) {
       shop_id: row.shop_id,
       email: row.email,
       display_name: row.display_name,
+      avatar_url: row.avatar_url || null,
       permissions,
     };
     next();
@@ -81,11 +97,16 @@ function requireAnyPermission(...permissions) {
   };
 }
 
-async function audit(actorId, action, entityType, entityId, summary, reason = null) {
+async function audit(actorId, action, entityType, entityId, summary, reason = null, shopId = null, ip = null) {
   try {
-    await run(`INSERT INTO audit_logs (id, actor_id, action, entity_type, entity_id, summary, reason)
-      VALUES (?,?,?,?,?,?,?)`, uid('aud'), actorId, action, entityType, entityId, summary, reason);
-  } catch { /* audit must never break the caller */ }
+    await run(
+      `INSERT INTO audit_logs (id, actor_id, action, entity_type, entity_id, summary, reason, shop_id, ip_address)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      uid('aud'), actorId, action, entityType, entityId, summary, reason, shopId, ip
+    );
+  } catch (e) {
+    console.error('[audit] failed to write audit log:', e.message);
+  }
 }
 
 module.exports = { sign, auth, requireRoles, requirePermission, requireAnyPermission, audit, JWT_SECRET };
