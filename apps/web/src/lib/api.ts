@@ -22,7 +22,14 @@ async function req(path: string, opts: RequestInit = {}) {
     headers: { 'Content-Type': 'application/json', ...(token() ? { Authorization: `Bearer ${token()}` } : {}), ...(opts.headers || {}) },
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((body as any).message || (body as any).error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err: any = new Error((body as any).message || (body as any).error || `HTTP ${res.status}`);
+    // Keep the server's structured context (duplicate rows, missing fields, …)
+    // so dialogs can explain the failure instead of only showing a message.
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
   return body;
 }
 

@@ -17,7 +17,7 @@ This repository currently contains **Phase 0 + Phase 1** in full and **Phase 2**
 | HR | Phase 2 — partial | Employees, attendance (manual + biometric import), salary structures, payroll runs |
 | Leave | Phase 2 — partial | Types, balances, requests, approvals, holidays |
 | CRM — customers | Phase 2 — done | Customer records, phone-first lookup, history, consent and occasions |
-| CRM — pipeline | **Phase 2 — backend done** | Leads, follow-up activities, support cases, atomic lead→customer conversion (UI pending) |
+| CRM — pipeline | **Phase 2 — done** | Leads board/table, follow-up activities, support cases, atomic lead→customer conversion |
 | Finance | Phase 3 — planned | Placeholder route with the planned scope |
 | Inventory | Phase 4 — planned | Placeholder route with the planned scope |
 | Reports / email | Phase 7 — planned | Placeholder routes |
@@ -168,13 +168,21 @@ Authenticated:
 - Settings: `GET|PUT /api/admin/settings`
 - Audit: `GET /api/audit-logs?q=&action=&from=&to=&limit=` (`audit.view`)
 - HR / leave / payroll: `/api/hr/*`
-- CRM: `/api/customers*`, `/api/offers`, `/api/campaigns*`, `/api/occasions*`, `/api/festivals*`
+- CRM: `/api/customers*`, `/api/offers`, `/api/campaigns*`
+- Campaign extras (mounted under admin): `/api/admin/occasions*`, `/api/admin/festivals*`, `/api/admin/email*`
 - CRM pipeline: `/api/crm/pipeline`, `/api/leads*`, `/api/leads/:id/convert`, `/api/activities*`, `/api/support-cases*`
 - Sales: `/api/sales/draft`, `/api/sales/:id/finalize`, `/api/sales/:id/void`, `/api/sales*`
 - Inventory: `/api/categories*`, `/api/products*`, `/api/suppliers*`, `/api/purchases*`
 - Email: `/api/email/*` (`company.manage`, or `crm.manage` for offer sends)
 
 All of the above are permission-gated on the server. Errors use a consistent shape: `{ "error": "...", "message": "...", "required": "permission.key" }`.
+
+### CRM screens (SPA)
+
+- `/admin/crm/leads` — board and table views, filters, create/edit, archive.
+- Lead detail — contact record, stage changes, follow-ups (add / done / reopen / archive) and the atomic **Convert to customer** dialog (name, phone and full postal address).
+- `/admin/crm/support-cases` — filtered list and detail with status, priority and assignee controls.
+- `/admin` — open leads, overdue follow-ups and open support cases counters for `crm.view` holders.
 
 ---
 
@@ -220,7 +228,7 @@ Legacy CSS variables such as `--color-gold` are kept as aliases that point at th
 
 ## Next phases
 
-1. ~~CRM pipeline (leads, enquiries, follow-ups, support cases).~~ Backend done; screens owned by the frontend workstream.
+1. ~~CRM pipeline (leads, enquiries, follow-ups, support cases).~~ **Done** — API and screens (board/table, lead detail, conversion, support cases).
 2. Backend hardening: shared validation layer (`zod` is installed but unused), locked document-number series, OpenAPI contract, pagination convention.
 3. Finance: chart of accounts, journals, invoices, payments, tax and reports.
 4. Inventory: item master, purchase orders, goods receipt and posted stock movements.

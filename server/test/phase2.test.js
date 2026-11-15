@@ -138,8 +138,9 @@ test('former admin-only routes now follow named permissions', async () => {
   assert.equal(employeeSettings.status, 403);
   assert.equal(employeeSettings.body.required, 'company.manage');
 
-  // Email configuration needs company.manage; Finance only holds finance.*.
-  const financeEmail = await api('GET', '/email/settings', financeTok);
+  // Email configuration needs company.manage or crm.manage; Finance only holds finance.*.
+  // The email router is mounted under /admin, matching the SPA path.
+  const financeEmail = await api('GET', '/admin/email/settings', financeTok);
   assert.equal(financeEmail.status, 403);
   assert.deepEqual(financeEmail.body.required, ['company.manage', 'crm.manage']);
 
@@ -151,11 +152,11 @@ test('former admin-only routes now follow named permissions', async () => {
   const salesRates = await api('GET', '/gold-rates', salesTok);
   assert.equal(salesRates.status, 200);
 
-  const employeeFestivals = await api('GET', '/festivals', employeeTok);
+  const employeeFestivals = await api('GET', '/admin/festivals', employeeTok);
   assert.equal(employeeFestivals.status, 403);
   assert.equal(employeeFestivals.body.required, 'crm.view');
 
-  const salesFestivals = await api('GET', '/festivals', salesTok);
+  const salesFestivals = await api('GET', '/admin/festivals', salesTok);
   assert.equal(salesFestivals.status, 200);
 
   const financeSuppliers = await api('GET', '/suppliers', financeTok);
