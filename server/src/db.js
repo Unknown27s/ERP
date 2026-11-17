@@ -36,9 +36,13 @@ function toPg(sql) {
 const { Pool, types } = require('pg');
 types.setTypeParser(20, (v) => parseInt(v, 10)); // int8 (COUNT(*)) -> JS int
 types.setTypeParser(1700, (v) => parseFloat(v)); // numeric -> JS number
+const sslConfig = process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true'
+  ? { rejectUnauthorized: true, ca: process.env.DB_SSL_CA ? fs.readFileSync(process.env.DB_SSL_CA, 'utf8') : undefined }
+  : (DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1') ? false : { rejectUnauthorized: false });
+
 const pgPool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Supabase requires SSL
+  ssl: sslConfig,
   max: 10,
 });
 pgPool.on('error', (e) => console.error('[db] pg pool error:', e.message));
@@ -100,7 +104,7 @@ async function withTransaction(fn) {
 }
 
 let _ready = null;
-const MIGRATIONS = ['0001_init', '0002_roles_staff', '0003_offers_created_at', '0004_email_settings', '0005_occasions_festivals', '0006_campaign_schedule', '0007_hr', '0008_erp_foundation', '0009_holiday_soft_delete', '0010_crm_pipeline'];
+const MIGRATIONS = ['0001_init', '0002_roles_staff', '0003_offers_created_at', '0004_email_settings', '0005_occasions_festivals', '0006_campaign_schedule', '0007_hr', '0008_erp_foundation', '0009_holiday_soft_delete', '0010_crm_pipeline', '0011_employee_portal_and_workflows', '0012_security_hardening'];
 const migFile = (m) => fs.readFileSync(
   path.join(__dirname, '..', '..', 'supabase', 'migrations', `${m}_pg.sql`), 'utf8');
 

@@ -39,6 +39,7 @@ export const api = {
   put: (p: string, b?: unknown) => req(p, { method: 'PUT', body: JSON.stringify(b || {}) }),
   patch: (p: string, b?: unknown) => req(p, { method: 'PATCH', body: JSON.stringify(b || {}) }),
   del: (p: string) => req(p, { method: 'DELETE' }),
+  delete: (p: string) => req(p, { method: 'DELETE' }),
   login: (email: string, password: string) => req('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 };
 export const inr = (n: number | string) => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });

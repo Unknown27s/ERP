@@ -50,8 +50,8 @@ export default function Login() {
   const { brand } = useBranding();
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState('admin@marvelsoftware.local');
-  const [password, setPassword] = useState('Admin@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -250,30 +250,32 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* 1-Click Demo Accounts Selector */}
-          <div className="pt-6 border-t border-slate-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-slate-500">Quick sign-in with demo roles:</span>
-              <span className="text-[11px] font-semibold text-brand-600">Click to fill</span>
+          {/* 1-Click Demo Accounts Selector (Only enabled in Development mode) */}
+          {import.meta.env.DEV && (
+            <div className="pt-6 border-t border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-slate-500">Quick sign-in with demo roles (Dev only):</span>
+                <span className="text-[11px] font-semibold text-brand-600">Click to fill</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {DEMO_ACCOUNTS.map((d) => (
+                  <button
+                    key={d.role}
+                    type="button"
+                    onClick={() => fillDemo(d.email, d.pass)}
+                    className={`text-left p-2.5 rounded-lg border text-xs transition-all ${
+                      email === d.email
+                        ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500'
+                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
+                    }`}
+                  >
+                    <div className="font-semibold text-slate-800">{d.role}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{d.badge}</div>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {DEMO_ACCOUNTS.map((d) => (
-                <button
-                  key={d.role}
-                  type="button"
-                  onClick={() => fillDemo(d.email, d.pass)}
-                  className={`text-left p-2.5 rounded-lg border text-xs transition-all ${
-                    email === d.email
-                      ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500'
-                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
-                  }`}
-                >
-                  <div className="font-semibold text-slate-800">{d.role}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{d.badge}</div>
-                </button>
-              ))}
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
