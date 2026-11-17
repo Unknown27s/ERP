@@ -30,9 +30,20 @@ router.get('/customers/phone/:phone', requirePermission('crm.view'), async (req,
 });
 
 // ---- Customers (§5.4) ----
+// Sortable customer columns. Whitelisted because the value is interpolated
+// into the ORDER BY clause, which cannot be parameterised.
+const CUSTOMER_SORTS = {
+  customer_code: 'c.customer_code',
+  name: 'c.name',
+  total_spent_inr: 'c.total_spent_inr',
+  purchase_count: 'c.purchase_count',
+  last_purchase_at: 'c.last_purchase_at',
+  created_at: 'c.created_at',
+};
+
 router.get('/customers', requirePermission('crm.view'), async (req, res) => {
   const { q, occasion, category, min_spent, max_spent, from, to, page = 1, limit = 20,
-    last_days, lapsed_days, repeat, last_from, last_to } = req.query;
+    last_days, lapsed_days, repeat, last_from, last_to, sort, dir } = req.query;
   const conds = ['c.shop_id = ?']; const args = [req.user.shop_id];
   if (q) {
     const norm = normalizePhone(q);
@@ -70,9 +81,13 @@ router.get('/customers', requirePermission('crm.view'), async (req, res) => {
     args.push(category);
   }
   const off = (Number(page) - 1) * Number(limit);
-  const rows = await all(`SELECT c.* FROM customers c WHERE ${conds.join(' AND ')} ORDER BY c.created_at DESC LIMIT ? OFFSET ?`, ...args, Number(limit), off);
+  // NULLS LAST keeps customers with no purchase yet at the bottom of every sort.
+  const sortCol = CUSTOMER_SORTS[sort] || 'c.created_at';
+  const sortDir = String(dir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  const rows = await all(`SELECT c.* FROM customers c WHERE ${conds.join(' AND ')}
+    ORDER BY ${sortCol} ${sortDir} NULLS LAST, c.id ASC LIMIT ? OFFSET ?`, ...args, Number(limit), off);
   const total = (await get(`SELECT COUNT(*) n FROM customers c WHERE ${conds.join(' AND ')}`, ...args)).n;
-  res.json({ data: rows, total, page: Number(page) });
+  res.json({ data: rows, total, page: Number(page), sort: sort || 'created_at', dir: sortDir.toLowerCase() });
 });
 // Customers must always have a name, phone and a complete postal address.
 const CUSTOMER_REQUIRED = ['name', 'phone', 'address_line1', 'city', 'state', 'postal_code'];
@@ -331,26 +346,43 @@ router.get('/reports/customers', requirePermission('reports.view'), async (req, 
   const total = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=?`, req.user.shop_id)).n;
   res.json({ data: { new_customers: created, repeat_customers: repeat, total, repeat_rate: total ? repeat / total : 0 } });
 });
+// Distinct actions, for the audit filter dropdown. Counted per shop so the
+// list never exposes action names that only occur in another company's trail.
+router.get('/audit-logs/actions', requirePermission('audit.view'), async (req, res) => {
+  const rows = await all(
+    `SELECT a.action, COUNT(*) n FROM audit_logs a
+     WHERE a.actor_id IN (SELECT user_id FROM profiles WHERE shop_id = ?)
+     GROUP BY a.action ORDER BY a.action`,
+    req.user.shop_id
+  );
+  res.json({ data: rows });
+});
+
 router.get('/audit-logs', requirePermission('audit.view'), async (req, res) => {
-  const { q, action, from, to, limit = 200 } = req.query;
+  const { q, action, actor, from, to, page = 1, limit = 50 } = req.query;
   // `audit_logs` has no shop column, so scope through the actor's profile.
   const conds = ['a.actor_id IN (SELECT user_id FROM profiles WHERE shop_id = ?)'];
   const args = [req.user.shop_id];
   if (action) { conds.push('a.action = ?'); args.push(String(action)); }
+  if (actor) { conds.push('a.actor_id = ?'); args.push(String(actor)); }
   if (from) { conds.push('a.created_at >= ?'); args.push(String(from)); }
   if (to) { conds.push('a.created_at <= ?'); args.push(`${String(to)}T23:59:59.999Z`); }
   if (q) {
-    conds.push('(a.action LIKE ? OR a.entity_type LIKE ? OR a.summary LIKE ? OR a.actor_id LIKE ?)');
+    conds.push('(a.action LIKE ? OR a.entity_type LIKE ? OR a.summary LIKE ? OR a.actor_id LIKE ? OR a.entity_id LIKE ?)');
     const like = `%${q}%`;
-    args.push(like, like, like, like);
+    args.push(like, like, like, like, like);
   }
+  const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const off = (Math.max(Number(page) || 1, 1) - 1) * lim;
+  const where = conds.join(' AND ');
   const rows = await all(
     `SELECT a.*, p.display_name AS actor_name, p.email AS actor_email
      FROM audit_logs a LEFT JOIN profiles p ON p.user_id = a.actor_id
-     WHERE ${conds.join(' AND ')} ORDER BY a.created_at DESC LIMIT ?`,
-    ...args, Math.min(Number(limit) || 200, 500)
+     WHERE ${where} ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?`,
+    ...args, lim, off
   );
-  res.json({ data: rows });
+  const total = Number((await get(`SELECT COUNT(*) n FROM audit_logs a WHERE ${where}`, ...args)).n || 0);
+  res.json({ data: rows, total, page: Math.max(Number(page) || 1, 1), limit: lim });
 });
 
 module.exports = router;

@@ -1,96 +1,289 @@
+/**
+ * ==============================================================================
+ * CRM · CUSTOMER MASTER (Customers.tsx)
+ * ==============================================================================
+ * The single source of truth for every registered customer profile.
+ *
+ * Layout:
+ * 1. Header with an export action and the amber "new profile" entry point.
+ * 2. KPI strip: portfolio totals from /reports/customers when the signed-in
+ *    role may read reports, otherwise filter-scoped counts only. Nothing here
+ *    is derived from a partial page of rows.
+ * 3. CRM tab bar, so Customers sits beside Leads and Support Cases.
+ * 4. Filter bar: free text, spend band, purchase recency and custom dates.
+ * 5. Sortable, paginated table (sorting is server-side; see CUSTOMER_SORTS).
+ * 6. Customer detail popup with Overview / Purchases / Support cases /
+ *    Activity / Consent. Editing opens above the detail popup.
+ *
+ * Every figure shown is returned by the API. Where a permission hides data
+ * (for example cost), the field is simply absent rather than estimated.
+ * ==============================================================================
+ */
+
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  Activity as ActivityIcon,
+  AlertTriangle,
+  Cake,
+  CalendarHeart,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  Download,
+  LifeBuoy,
+  Loader2,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  ReceiptText,
+  RefreshCw,
+  Repeat,
+  Search,
+  ShieldCheck,
+  UserRound,
+  UsersRound,
+  X,
+} from 'lucide-react';
 import { api, inr } from '../../lib/api';
-import InvoiceModal from '../../components/InvoiceModal';
+import { cn, formatInr } from '../../lib/utils';
 import Modal from '../../components/Modal';
-import { Icon, ICONS } from '../../components/icons';
+import InvoiceModal from '../../components/InvoiceModal';
+import PageHeader from '../../components/PageHeader';
+import { Badge } from '../../components/ui/Badge';
+import { downloadCsv, fileStamp, type CsvColumn } from '../../lib/export';
 import { downloadInvoicePdf } from '../../lib/invoicePdf';
+import { useAuth } from '../../hooks/auth';
+import { CrmNav, Kpi, Pagination, prettyDate } from './crm/crmUi';
+
+/* ── Records & validation ──────────────────────────────────────────────────── */
+
+type Customer = {
+  id: string;
+  customer_code: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  address_line1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  birthday?: string | null;
+  anniversary?: string | null;
+  notes?: string | null;
+  marketing_consent: number;
+  total_spent_inr: number;
+  purchase_count: number;
+  last_purchase_at?: string | null;
+  created_at: string;
+};
 
 const EMPTY_FORM = {
-  name: '', phone: '', email: '', address_line1: '', city: '', state: '', postal_code: '',
-  birthday: '', anniversary: '', marketing_consent: true,
+  name: '',
+  phone: '',
+  email: '',
+  address_line1: '',
+  city: '',
+  state: '',
+  postal_code: '',
+  birthday: '',
+  anniversary: '',
+  marketing_consent: true,
 };
-const REQUIRED = ['name', 'phone', 'address_line1', 'city', 'state', 'postal_code'];
-const FIELD_LABELS: Record<string, string> = {
-  name: 'Full name', phone: 'Phone', email: 'Email', address_line1: 'Street address',
-  city: 'City', state: 'State', postal_code: 'PIN code', birthday: 'Birthday', anniversary: 'Anniversary',
-};
-const missingFields = (f: any) => REQUIRED.filter((k) => !String(f[k] ?? '').trim());
-const missingMsg = (f: any) => `Please fill the required fields: ${missingFields(f).map((k) => FIELD_LABELS[k]).join(', ')}.`;
 
-function CustomerFields({ value, onChange, errors }: { value: any; onChange: (v: any) => void; errors?: Record<string, string> }) {
-  const set = (k: string, v: any) => onChange({ ...value, [k]: v });
-  const field = (k: string, opts: { type?: string; placeholder?: string; span?: boolean } = {}) => (
-    <div key={k} style={opts.span ? { gridColumn: '1 / -1' } : undefined}>
-      <label className="lbl">{FIELD_LABELS[k]}{REQUIRED.includes(k) ? ' *' : ''}</label>
-      <input
-        type={opts.type || 'text'}
-        value={value[k] ?? ''}
-        onChange={(e) => set(k, e.target.value)}
-        placeholder={opts.placeholder}
-      />
-      {errors?.[k] && <div className="modal-error">{errors[k]}</div>}
-    </div>
-  );
+/** Mirrors CUSTOMER_REQUIRED in server/src/routes/crm.js. */
+const REQUIRED = ['name', 'phone', 'address_line1', 'city', 'state', 'postal_code'] as const;
+
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Full name',
+  phone: 'Phone',
+  email: 'Email',
+  address_line1: 'Street address',
+  city: 'City',
+  state: 'State',
+  postal_code: 'PIN code',
+  birthday: 'Birthday',
+  anniversary: 'Anniversary',
+};
+
+const missingFields = (f: Record<string, any>) => REQUIRED.filter((k) => !String(f[k] ?? '').trim());
+
+const missingMessage = (f: Record<string, any>) =>
+  `Please fill the required fields: ${missingFields(f)
+    .map((k) => FIELD_LABELS[k] || k)
+    .join(', ')}.`;
+
+const addressOf = (c: Customer) =>
+  [c.address_line1, c.city, c.state, c.postal_code].filter(Boolean).join(', ') || 'No address on record';
+
+const EXPORT_COLUMNS: CsvColumn<Customer>[] = [
+  { header: 'Customer code', value: (r) => r.customer_code },
+  { header: 'Name', value: (r) => r.name },
+  { header: 'Phone', value: (r) => r.phone },
+  { header: 'Email', value: (r) => r.email || '' },
+  { header: 'Address', value: (r) => r.address_line1 || '' },
+  { header: 'City', value: (r) => r.city || '' },
+  { header: 'State', value: (r) => r.state || '' },
+  { header: 'PIN code', value: (r) => r.postal_code || '' },
+  { header: 'Purchases', value: (r) => r.purchase_count ?? 0 },
+  { header: 'Total spent (INR)', value: (r) => Number(r.total_spent_inr || 0).toFixed(2) },
+  { header: 'Last purchase', value: (r) => (r.last_purchase_at ? String(r.last_purchase_at).slice(0, 10) : '') },
+  { header: 'Marketing consent', value: (r) => (r.marketing_consent ? 'yes' : 'no') },
+  { header: 'Birthday', value: (r) => r.birthday || '' },
+  { header: 'Anniversary', value: (r) => r.anniversary || '' },
+  { header: 'Created', value: (r) => String(r.created_at || '').slice(0, 10) },
+];
+
+/* ── Shared field grid ─────────────────────────────────────────────────────── */
+
+function CustomerFields({
+  value,
+  onChange,
+  errors,
+}: {
+  value: Record<string, any>;
+  onChange: (next: Record<string, any>) => void;
+  errors?: Record<string, string>;
+}) {
+  const set = (key: string, next: any) => onChange({ ...value, [key]: next });
+
+  const field = (
+    key: string,
+    opts: { type?: string; placeholder?: string; span?: boolean; hint?: string } = {},
+  ) => {
+    const required = (REQUIRED as readonly string[]).includes(key);
+    return (
+      <div key={key} className={opts.span ? 'sm:col-span-2' : undefined}>
+        <label className="lbl">
+          {FIELD_LABELS[key]}
+          {required ? ' *' : ''}
+        </label>
+        <input
+          type={opts.type || 'text'}
+          value={value[key] ?? ''}
+          onChange={(e) => set(key, e.target.value)}
+          placeholder={opts.placeholder}
+          aria-invalid={!!errors?.[key]}
+        />
+        {opts.hint && !errors?.[key] && <div className="mt-1 text-[11px] text-slate-500">{opts.hint}</div>}
+        {errors?.[key] && <div className="modal-error">{errors[key]}</div>}
+      </div>
+    );
+  };
+
   return (
     <div className="modal-grid">
       {field('name', { placeholder: 'e.g. Radhika Sethi' })}
       {field('phone', { type: 'tel', placeholder: '10-digit mobile' })}
       {field('email', { type: 'email', placeholder: 'name@example.com' })}
+      {field('birthday', { type: 'date' })}
+      {field('anniversary', { type: 'date' })}
       {field('address_line1', { placeholder: 'House / street / locality', span: true })}
       {field('city', { placeholder: 'e.g. Bengaluru' })}
       {field('state', { placeholder: 'e.g. Karnataka' })}
       {field('postal_code', { placeholder: 'e.g. 560001' })}
-      {field('birthday', { type: 'date' })}
-      {field('anniversary', { type: 'date' })}
     </div>
   );
 }
 
-/* ── New customer popup ────────────────────────────────────────── */
-function NewCustomerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState<any>(EMPTY_FORM);
+/* ── New customer popup ────────────────────────────────────────────────────── */
+
+function NewCustomerModal({
+  onClose,
+  onSaved,
+  onOpenExisting,
+}: {
+  onClose: () => void;
+  onSaved: () => void;
+  onOpenExisting: (id: string) => void;
+}) {
+  const [form, setForm] = useState<Record<string, any>>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [msg, setMsg] = useState('');
+  const [message, setMessage] = useState('');
+  const [duplicates, setDuplicates] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (missingFields(form).length) {
-      setErrors(Object.fromEntries(missingFields(form).map((k) => [k, 'Required'])));
-      setMsg(missingMsg(form));
+    const missing = missingFields(form);
+    if (missing.length) {
+      setErrors(Object.fromEntries(missing.map((k) => [k, 'Required'])));
+      setMessage(missingMessage(form));
       return;
     }
+    setErrors({});
+    setMessage('');
+    setDuplicates([]);
     try {
       setSaving(true);
       await api.post('/customers', form);
       onSaved();
       onClose();
-    } catch (e: any) { setMsg(e.message); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      // 409 carries the conflicting profiles. Records are never auto-merged,
+      // so surface them and let the user open the right one.
+      if (e.body?.error === 'duplicate' && Array.isArray(e.body?.data)) {
+        setDuplicates(e.body.data);
+        setMessage('This phone number already belongs to an existing customer.');
+      } else {
+        setMessage(e.message || 'Could not save the customer.');
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
       title="New customer"
-      subtitle="Register a customer profile. Name, phone and a full address are mandatory."
-      icon={<Icon paths={ICONS.customers} size={19} />}
+      subtitle="Register a customer profile. Name, phone and a full postal address are mandatory."
+      icon={<UsersRound className="h-5 w-5" />}
       onClose={onClose}
       size="lg"
       footer={
         <>
           <span className="modal-hint">Marketing consent defaults to opted in.</span>
           <span className="grow" />
-          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
           <button type="button" className="btn" onClick={save} disabled={saving}>
             {saving ? 'Saving…' : 'Save customer'}
           </button>
         </>
       }
     >
-      {msg && <div className="err-box" style={{ marginBottom: 12 }}>{msg}</div>}
+      {message && (
+        <div className="err-box" style={{ marginBottom: 12 }}>
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{message}</span>
+          </div>
+          {duplicates.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {duplicates.map((d) => (
+                <li key={d.id}>
+                  <button
+                    type="button"
+                    className="text-left text-xs font-semibold underline underline-offset-2"
+                    onClick={() => {
+                      onClose();
+                      onOpenExisting(d.id);
+                    }}
+                  >
+                    {d.customer_code} · {d.name} · {d.phone}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <CustomerFields value={form} onChange={setForm} errors={errors} />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, fontSize: 13 }}>
+
+      <label className="mt-4 flex items-center gap-2 text-[13px] text-slate-700">
         <input
           type="checkbox"
           style={{ width: 'auto' }}
@@ -103,169 +296,482 @@ function NewCustomerModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
   );
 }
 
-/* ── Edit customer popup (nested above the detail popup) ───────── */
-function EditCustomerModal({ customer, onClose, onSaved }: { customer: any; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState<any>({
-    name: customer.name ?? '', phone: customer.phone ?? '', email: customer.email ?? '',
-    address_line1: customer.address_line1 ?? '', city: customer.city ?? '', state: customer.state ?? '',
-    postal_code: customer.postal_code ?? '', birthday: customer.birthday ?? '', anniversary: customer.anniversary ?? '',
+/* ── Edit customer popup ───────────────────────────────────────────────────── */
+
+function EditCustomerModal({
+  customer,
+  onClose,
+  onSaved,
+}: {
+  customer: Customer;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<Record<string, any>>({
+    name: customer.name ?? '',
+    phone: customer.phone ?? '',
+    email: customer.email ?? '',
+    address_line1: customer.address_line1 ?? '',
+    city: customer.city ?? '',
+    state: customer.state ?? '',
+    postal_code: customer.postal_code ?? '',
+    birthday: customer.birthday ?? '',
+    anniversary: customer.anniversary ?? '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [msg, setMsg] = useState('');
+  const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (missingFields(form).length) {
-      setErrors(Object.fromEntries(missingFields(form).map((k) => [k, 'Required'])));
-      setMsg(missingMsg(form));
+    const missing = missingFields(form);
+    if (missing.length) {
+      setErrors(Object.fromEntries(missing.map((k) => [k, 'Required'])));
+      setMessage(missingMessage(form));
       return;
     }
+    setErrors({});
+    setMessage('');
     try {
       setSaving(true);
       await api.patch(`/customers/${customer.id}`, form);
       onSaved();
       onClose();
-    } catch (e: any) { setMsg(e.message); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      setMessage(e.body?.message || e.message || 'Could not save the changes.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Modal
-      title="Edit customer"
-      subtitle="Name, phone and a full address are mandatory."
-      icon={<Icon paths={ICONS.customers} size={19} />}
+      title={`Edit ${customer.customer_code}`}
+      subtitle={`${customer.name} · the mandatory fields must stay complete.`}
+      icon={<UserRound className="h-5 w-5" />}
       onClose={onClose}
       size="lg"
       zIndex={1100}
       footer={
         <>
           <span className="grow" />
-          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Cancel
+          </button>
           <button type="button" className="btn" onClick={save} disabled={saving}>
             {saving ? 'Saving…' : 'Save changes'}
           </button>
         </>
       }
     >
-      {msg && <div className="err-box" style={{ marginBottom: 12 }}>{msg}</div>}
+      {message && (
+        <div className="err-box" style={{ marginBottom: 12 }}>
+          {message}
+        </div>
+      )}
       <CustomerFields value={form} onChange={setForm} errors={errors} />
     </Modal>
   );
 }
 
-/* ── Customer detail popup ─────────────────────────────────────── */
-function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: string; onClose: () => void; onChanged: () => void }) {
-  const detail = useQuery({ queryKey: ['cus-d', customerId], queryFn: () => api.get(`/customers/${customerId}`) });
+/* ── Customer detail popup ─────────────────────────────────────────────────── */
+
+const DETAIL_TABS = [
+  { key: 'overview', label: 'Overview', icon: UserRound },
+  { key: 'purchases', label: 'Purchases', icon: ReceiptText },
+  { key: 'cases', label: 'Support cases', icon: LifeBuoy },
+  { key: 'activity', label: 'Activity', icon: ActivityIcon },
+  { key: 'consent', label: 'Consent', icon: ShieldCheck },
+] as const;
+
+type DetailTab = (typeof DETAIL_TABS)[number]['key'];
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2 last:border-0">
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      <span className="text-right text-[13px] font-semibold text-slate-900">{value}</span>
+    </div>
+  );
+}
+
+function CustomerDetailModal({
+  customerId,
+  onClose,
+  onChanged,
+}: {
+  customerId: string;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { can } = useAuth();
+  const [tab, setTab] = useState<DetailTab>('overview');
   const [editing, setEditing] = useState(false);
   const [previewSaleId, setPreviewSaleId] = useState<string | null>(null);
   const [downloadingSaleId, setDownloadingSaleId] = useState<string | null>(null);
-  const d = detail.data?.data;
+
+  const detail = useQuery({
+    queryKey: ['customer-detail', customerId],
+    queryFn: () => api.get(`/customers/${customerId}`),
+  });
+
+  const cases = useQuery({
+    queryKey: ['customer-cases', customerId],
+    queryFn: () => api.get(`/support-cases?customer_id=${customerId}&limit=20&include_inactive=1`),
+    enabled: tab === 'cases',
+  });
+
+  const activity = useQuery({
+    queryKey: ['customer-activity', customerId],
+    queryFn: () => api.get(`/activities?customer_id=${customerId}&limit=25`),
+    enabled: tab === 'activity',
+  });
+
+  const customer: (Customer & {
+    purchases?: any[];
+    consent?: any[];
+    occasions?: any[];
+    addresses?: any[];
+    preferred_channel?: string;
+  }) | undefined = detail.data?.data;
+
+  const purchases = customer?.purchases || [];
+  const consent = customer?.consent || [];
+
+  const download = async (saleId: string) => {
+    try {
+      setDownloadingSaleId(saleId);
+      const res = await api.get(`/sales/${saleId}`);
+      downloadInvoicePdf(res.data);
+    } catch (e: any) {
+      alert(`Download failed: ${e.message}`);
+    } finally {
+      setDownloadingSaleId(null);
+    }
+  };
 
   return (
     <>
       <Modal
-        title={d ? d.name : 'Customer'}
-        subtitle={d ? `${d.customer_code} • ${d.phone}${d.email ? ` • ${d.email}` : ''}` : 'Loading customer record…'}
-        icon={<Icon paths={ICONS.customers} size={19} />}
+        title={customer ? customer.name : 'Customer'}
+        subtitle={
+          customer
+            ? [customer.customer_code, customer.phone, customer.email].filter(Boolean).join(' · ')
+            : 'Loading customer record…'
+        }
+        icon={<UsersRound className="h-5 w-5" />}
         onClose={onClose}
         size="xl"
-        zIndex={1000}
         footer={
           <>
+            <span className="modal-hint">Purchases are finalized bills only. Drafts and voids are excluded.</span>
             <span className="grow" />
-            <button type="button" className="btn ghost" onClick={onClose}>Close</button>
-            {d && <button type="button" className="btn primary" onClick={() => setEditing(true)}>Edit customer</button>}
+            <button type="button" className="btn ghost" onClick={onClose}>
+              Close
+            </button>
+            {customer && can('crm.manage') && (
+              <button type="button" className="btn" onClick={() => setEditing(true)}>
+                Edit customer
+              </button>
+            )}
           </>
         }
       >
-        {!d ? <div className="empty" style={{ padding: 40 }}>Loading…</div> : (
-          <>
-            <div className="modal-kpis">
-              <div className="modal-kpi"><small>Total spent</small><strong>{inr(d.total_spent_inr)}</strong></div>
-              <div className="modal-kpi"><small>Purchases</small><strong>{d.purchase_count ?? d.purchases.length}</strong></div>
-              <div className="modal-kpi"><small>Last purchase</small><strong>{d.purchases[0]?.sold_at?.slice(0, 10) || 'None'}</strong></div>
-              <div className="modal-kpi"><small>Consent</small><strong>{d.marketing_consent ? 'Opted in' : 'No'}</strong></div>
-            </div>
+        {detail.isLoading && <div className="py-10 text-center text-sm text-slate-500">Loading…</div>}
 
-            <div className="modal-grid" style={{ marginBottom: 16 }}>
-              <div>
-                <p className="modal-section-title">Contact</p>
-                <div className="pd-field"><span>Phone</span><strong>{d.phone || '—'}</strong></div>
-                <div className="pd-field"><span>Email</span><strong>{d.email || '—'}</strong></div>
-                <div className="pd-field"><span>Birthday</span><strong>{d.birthday || '—'}</strong></div>
-                <div className="pd-field"><span>Anniversary</span><strong>{d.anniversary || '—'}</strong></div>
+        {detail.isError && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            Could not load this customer record.
+          </div>
+        )}
+
+        {customer && (
+          <>
+            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total spent</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">{inr(customer.total_spent_inr)}</div>
               </div>
-              <div>
-                <p className="modal-section-title">Address</p>
-                <div className="pd-field" style={{ alignItems: 'flex-start' }}>
-                  <span>Ship to</span>
-                  <strong style={{ textAlign: 'right' }}>
-                    {[d.address_line1, d.city, d.state, d.postal_code].filter(Boolean).join(', ') || 'No address on record'}
-                  </strong>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Purchases</div>
+                <div className="mt-1 text-lg font-bold text-slate-900">
+                  {customer.purchase_count ?? purchases.length}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Last purchase</div>
+                <div className="mt-1 text-sm font-bold text-slate-900">
+                  {customer.last_purchase_at ? prettyDate(customer.last_purchase_at) : 'None yet'}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Consent</div>
+                <div className="mt-1">
+                  {customer.marketing_consent ? (
+                    <Badge variant="success">Opted in</Badge>
+                  ) : (
+                    <Badge variant="secondary">Not opted in</Badge>
+                  )}
                 </div>
               </div>
             </div>
 
-            <p className="modal-section-title">Purchases ({d.purchases.length})</p>
-            <div className="tbl-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Invoice</th>
-                    <th>Date</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.purchases.map((s: any) => (
-                    <tr key={s.id}>
-                      <td><strong>{s.invoice_no}</strong></td>
-                      <td>{s.sold_at?.slice(0, 10)}</td>
-                      <td style={{ fontWeight: 600, textAlign: 'right' }}>{inr(s.total_inr)}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button type="button" className="btn ghost xs" onClick={() => setPreviewSaleId(s.id)} title="View bill">View</button>
-                          <button
-                            type="button"
-                            className="btn ghost xs"
-                            onClick={async () => {
-                              try {
-                                setDownloadingSaleId(s.id);
-                                const res = await api.get(`/sales/${s.id}`);
-                                downloadInvoicePdf(res.data);
-                              } catch (e: any) {
-                                alert(`Download failed: ${e.message}`);
-                              } finally { setDownloadingSaleId(null); }
-                            }}
-                            disabled={downloadingSaleId === s.id}
-                            title="Download PDF"
-                          >
-                            {downloadingSaleId === s.id ? '…' : 'PDF'}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!d.purchases.length && <tr><td colSpan={4} style={{ color: 'var(--color-muted)' }}>No purchases yet.</td></tr>}
-                </tbody>
-              </table>
+            <div className="mb-4 flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1">
+              {DETAIL_TABS.map((entry) => {
+                const Icon = entry.icon;
+                const active = tab === entry.key;
+                return (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    onClick={() => setTab(entry.key)}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+                      active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100',
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {entry.label}
+                  </button>
+                );
+              })}
             </div>
 
-            <p className="modal-section-title" style={{ marginTop: 16 }}>Consent history</p>
-            <ul className="modal-list">
-              {d.consent.map((c: any) => <li key={c.id}><small>{c.created_at?.slice(0, 10)} — {c.status} ({c.source})</small></li>)}
-              {!d.consent.length && <li><small style={{ color: 'var(--color-muted)' }}>No consent changes recorded.</small></li>}
-            </ul>
+            {tab === 'overview' && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Contact
+                  </p>
+                  <DetailRow
+                    label="Phone"
+                    value={
+                      <span className="inline-flex items-center gap-1.5">
+                        <Phone className="h-3.5 w-3.5 text-slate-400" />
+                        {customer.phone || '—'}
+                      </span>
+                    }
+                  />
+                  <DetailRow
+                    label="Email"
+                    value={
+                      <span className="inline-flex items-center gap-1.5">
+                        <Mail className="h-3.5 w-3.5 text-slate-400" />
+                        {customer.email || '—'}
+                      </span>
+                    }
+                  />
+                  <DetailRow
+                    label="Birthday"
+                    value={
+                      <span className="inline-flex items-center gap-1.5">
+                        <Cake className="h-3.5 w-3.5 text-slate-400" />
+                        {customer.birthday ? prettyDate(customer.birthday) : '—'}
+                      </span>
+                    }
+                  />
+                  <DetailRow
+                    label="Anniversary"
+                    value={
+                      <span className="inline-flex items-center gap-1.5">
+                        <CalendarHeart className="h-3.5 w-3.5 text-slate-400" />
+                        {customer.anniversary ? prettyDate(customer.anniversary) : '—'}
+                      </span>
+                    }
+                  />
+                  <DetailRow label="Customer since" value={prettyDate(customer.created_at)} />
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Address
+                  </p>
+                  <div className="flex items-start gap-2 py-2 text-[13px] text-slate-800">
+                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span>{addressOf(customer)}</span>
+                  </div>
+                  {customer.notes && (
+                    <>
+                      <p className="mb-1 mt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                        Notes
+                      </p>
+                      <p className="whitespace-pre-line text-[13px] text-slate-700">{customer.notes}</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {tab === 'purchases' && (
+              <div>
+                {!purchases.length ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">
+                    No finalized purchases yet.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                          <th className="px-3 py-2">Invoice</th>
+                          <th className="px-3 py-2">Date</th>
+                          <th className="px-3 py-2 text-right">Total</th>
+                          <th className="px-3 py-2 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {purchases.map((sale) => (
+                          <tr key={sale.id} className="border-b border-slate-100 last:border-0">
+                            <td className="px-3 py-2 font-semibold text-slate-900">{sale.invoice_no}</td>
+                            <td className="px-3 py-2 text-slate-600">{prettyDate(sale.sold_at)}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-slate-900">
+                              {inr(sale.total_inr)}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  className="btn ghost xs"
+                                  onClick={() => setPreviewSaleId(sale.id)}
+                                >
+                                  View
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn ghost xs"
+                                  onClick={() => download(sale.id)}
+                                  disabled={downloadingSaleId === sale.id}
+                                >
+                                  {downloadingSaleId === sale.id ? '…' : 'PDF'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'cases' && (
+              <div>
+                {cases.isLoading && <div className="py-8 text-center text-sm text-slate-500">Loading cases…</div>}
+                {cases.isError && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    Could not load support cases.
+                  </div>
+                )}
+                {cases.data && !(cases.data.data || []).length && (
+                  <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">
+                    No support cases recorded for this customer.
+                  </div>
+                )}
+                {!!(cases.data?.data || []).length && (
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[11px] uppercase tracking-wider text-slate-500">
+                          <th className="px-3 py-2">Case</th>
+                          <th className="px-3 py-2">Subject</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2">Priority</th>
+                          <th className="px-3 py-2">Opened</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(cases.data?.data || []).map((row: any) => (
+                          <tr key={row.id} className="border-b border-slate-100 last:border-0">
+                            <td className="px-3 py-2 font-semibold text-slate-900">{row.case_code}</td>
+                            <td className="px-3 py-2 text-slate-700">{row.subject}</td>
+                            <td className="px-3 py-2">
+                              <Badge variant={row.status === 'open' ? 'info' : row.status === 'pending' ? 'warning' : row.status === 'resolved' ? 'success' : 'secondary'}>
+                                {row.status}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2">
+                              <Badge variant={row.priority === 'urgent' ? 'destructive' : row.priority === 'high' ? 'warning' : 'secondary'}>
+                                {row.priority}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2 text-slate-600">{prettyDate(row.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'activity' && (
+              <div>
+                {activity.isLoading && <div className="py-8 text-center text-sm text-slate-500">Loading activity…</div>}
+                {activity.isError && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    Could not load the activity trail.
+                  </div>
+                )}
+                {!!(activity.data?.data || []).length && (
+                  <ol className="space-y-2">
+                    {(activity.data?.data || []).map((row: any) => (
+                      <li key={row.id} className="rounded-lg border border-slate-200 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-slate-900">{row.subject}</span>
+                          <Badge variant={row.done_at ? 'success' : 'warning'}>
+                            {row.done_at ? 'Done' : 'Open'}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {row.kind} · {row.created_by_name || 'system'} · due {prettyDate(row.due_on)}
+                        </div>
+                        {row.notes && <p className="mt-2 text-[13px] text-slate-700">{row.notes}</p>}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {activity.data && !(activity.data.data || []).length && (
+                  <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">
+                    No follow-ups logged for this customer.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'consent' && (
+              <div>
+                {!consent.length ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-500">
+                    No consent changes recorded.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                    {consent.map((event: any) => (
+                      <li key={event.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                        <span className="inline-flex items-center gap-2 text-slate-700">
+                          <ShieldCheck className="h-3.5 w-3.5 text-slate-400" />
+                          {event.status}
+                          <span className="text-[11px] text-slate-500">({event.source})</span>
+                        </span>
+                        <span className="text-[11px] text-slate-500">{prettyDate(event.created_at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </>
         )}
       </Modal>
 
-      {editing && d && (
+      {editing && customer && (
         <EditCustomerModal
-          customer={{ ...d, id: customerId }}
+          customer={{ ...customer, id: customerId }}
           onClose={() => setEditing(false)}
-          onSaved={() => { detail.refetch(); onChanged(); }}
+          onSaved={() => {
+            detail.refetch();
+            onChanged();
+          }}
         />
       )}
 
@@ -274,40 +780,103 @@ function CustomerDetailModal({ customerId, onClose, onChanged }: { customerId: s
   );
 }
 
-/* ── All customers (table view) ────────────────────────────────── */
-const EMPTY_FILTERS = { q: '', minSpent: '', recency: '', lastFrom: '', lastTo: '' };
+/* ── Sortable table head ───────────────────────────────────────────────────── */
+
+function SortHead({
+  label,
+  column,
+  sort,
+  dir,
+  onSort,
+  align = 'left',
+}: {
+  label: string;
+  column: string;
+  sort: string;
+  dir: 'asc' | 'desc';
+  onSort: (column: string) => void;
+  align?: 'left' | 'right';
+}) {
+  const active = sort === column;
+  const Icon = !active ? ChevronsUpDown : dir === 'asc' ? ChevronUp : ChevronDown;
+  return (
+    <th className="whitespace-nowrap px-3 py-2.5">
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={cn(
+          'inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider transition-colors',
+          align === 'right' && 'justify-end',
+          active ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800',
+        )}
+        title={`Sort by ${label.toLowerCase()}`}
+      >
+        {label}
+        <Icon className="h-3 w-3" />
+      </button>
+    </th>
+  );
+}
+
+/* ── Customer list ─────────────────────────────────────────────────────────── */
+
+const EMPTY_FILTERS = {
+  q: '',
+  minSpent: '',
+  maxSpent: '',
+  recency: '',
+  lastFrom: '',
+  lastTo: '',
+};
+
+type Filters = typeof EMPTY_FILTERS;
 
 function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClosed: () => void }) {
-  const [draft, setDraft] = useState(EMPTY_FILTERS);
-  const [applied, setApplied] = useState(EMPTY_FILTERS);
+  const { can } = useAuth();
+  const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
+  const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
   const [newOpen, setNewOpen] = useState(startNew);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const [selId, setSelId] = useState<string | null>(null);
-  const extra = applied.recency === 'repeat' ? '&repeat=1'
-    : applied.recency.startsWith('last:') ? `&last_days=${applied.recency.slice(5)}`
-    : applied.recency.startsWith('lapsed:') ? `&lapsed_days=${applied.recency.slice(7)}`
-    : applied.recency === 'custom' && (applied.lastFrom || applied.lastTo)
-      ? `&last_from=${applied.lastFrom}&last_to=${applied.lastTo}` : '';
+  const [sort, setSort] = useState('created_at');
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const extra = useMemo(() => {
+    const parts: string[] = [];
+    if (applied.minSpent) parts.push(`&min_spent=${encodeURIComponent(applied.minSpent)}`);
+    if (applied.maxSpent) parts.push(`&max_spent=${encodeURIComponent(applied.maxSpent)}`);
+    if (applied.recency === 'repeat') parts.push('&repeat=1');
+    if (applied.recency.startsWith('last:')) parts.push(`&last_days=${applied.recency.slice(5)}`);
+    if (applied.recency.startsWith('lapsed:')) parts.push(`&lapsed_days=${applied.recency.slice(7)}`);
+    if (applied.recency === 'custom') {
+      if (applied.lastFrom) parts.push(`&last_from=${applied.lastFrom}`);
+      if (applied.lastTo) parts.push(`&last_to=${applied.lastTo}`);
+    }
+    return parts.join('');
+  }, [applied]);
+
   const query = useQuery({
-    queryKey: ['cus', applied, page, limit],
-    queryFn: () => api.get(`/customers?q=${encodeURIComponent(applied.q)}&min_spent=${applied.minSpent || 0}${extra}&page=${page}&limit=${limit}`),
+    queryKey: ['customers', applied, page, limit, sort, dir],
+    queryFn: () =>
+      api.get(
+        `/customers?q=${encodeURIComponent(applied.q)}&sort=${sort}&dir=${dir}&page=${page}&limit=${limit}${extra}`,
+      ),
   });
-  const rows = query.data?.data || [];
-  const total = query.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const pageNumbers: (number | '...')[] = (() => {
-    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    const pages: (number | '...')[] = [1];
-    const start = Math.max(2, page - 1);
-    const end = Math.min(totalPages - 1, page + 1);
-    if (start > 2) pages.push('...');
-    for (let i = start; i <= end; i++) pages.push(i);
-    if (end < totalPages - 1) pages.push('...');
-    pages.push(totalPages);
-    return pages;
-  })();
-  const hasFilters = !!(applied.q || applied.minSpent || applied.recency);
+
+  // Portfolio totals are a report, not a count over the visible page.
+  const report = useQuery({
+    queryKey: ['customer-report', 'month'],
+    queryFn: () => api.get('/reports/customers?preset=month'),
+    enabled: can('reports.view'),
+    retry: false,
+  });
+
+  const rows: Customer[] = query.data?.data || [];
+  const total = Number(query.data?.total ?? 0);
+  const hasFilters = !!(applied.q || applied.minSpent || applied.maxSpent || applied.recency);
+
   const closeNew = () => {
     setNewOpen(false);
     if (startNew) onNewClosed();
@@ -317,152 +886,369 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
     setApplied({ ...draft });
     setPage(1);
   };
+
   const clearAll = () => {
     setDraft(EMPTY_FILTERS);
     setApplied(EMPTY_FILTERS);
     setPage(1);
   };
 
+  const toggleSort = (column: string) => {
+    if (sort === column) {
+      setDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSort(column);
+      // Money and counts are most useful highest-first; names A-Z.
+      setDir(column === 'name' || column === 'customer_code' ? 'asc' : 'desc');
+    }
+    setPage(1);
+  };
+
+  const exportCsv = async () => {
+    try {
+      setExporting(true);
+      // Exports every match, not just the visible page. 5000 is a guard rail,
+      // not a paging limit: a single company will not exceed it.
+      const res = await api.get(
+        `/customers?q=${encodeURIComponent(applied.q)}&sort=${sort}&dir=${dir}&page=1&limit=5000${extra}`,
+      );
+      downloadCsv(`customers-${fileStamp()}`, EXPORT_COLUMNS, res.data || []);
+    } catch (e: any) {
+      alert(`Export failed: ${e.message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const stats = report.data?.data;
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-display)', margin: 0 }}>All Customers</h1>
-          <p style={{ color: 'var(--color-muted)', margin: '4px 0 0' }}>Every registered customer. Search and filter by name/phone/ID, spend and last purchase.</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" className="btn ghost" onClick={() => query.refetch()} style={{ fontSize: 13 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon paths={ICONS.refresh} size={14} />Refresh</span>
-          </button>
-          <button type="button" className="btn" onClick={() => setNewOpen(true)}>+ New customer</button>
-        </div>
+    <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
+      <PageHeader
+        eyebrow="CRM &amp; Sales"
+        meta={total > 0 ? `${total} matching ${total === 1 ? 'profile' : 'profiles'}` : 'Customer master'}
+        title="Customers"
+        description="Every registered customer, with spend, purchase recency and marketing consent. Records are never merged automatically — a shared phone resolves to an explicit choice."
+        actions={
+          <>
+            <button type="button" className="btn ghost" onClick={() => query.refetch()} disabled={query.isFetching}>
+              <span className="inline-flex items-center gap-1.5">
+                <RefreshCw className={`h-3.5 w-3.5 ${query.isFetching ? 'animate-spin' : ''}`} />
+                Refresh
+              </span>
+            </button>
+            <button type="button" className="btn ghost" onClick={exportCsv} disabled={exporting || !rows.length}>
+              <span className="inline-flex items-center gap-1.5">
+                <Download className="h-3.5 w-3.5" />
+                {exporting ? 'Exporting…' : 'Export CSV'}
+              </span>
+            </button>
+            {can('crm.manage') && (
+              <button type="button" className="btn" onClick={() => setNewOpen(true)}>
+                <span className="inline-flex items-center gap-1.5">
+                  <Plus className="h-4 w-4" />
+                  New customer
+                </span>
+              </button>
+            )}
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi
+          label="Total customers"
+          value={stats ? stats.total : total}
+          hint={stats ? 'All profiles on this company record' : 'Matching the current filters'}
+          icon={UsersRound}
+          tone="brand"
+        />
+        <Kpi
+          label="Repeat buyers"
+          value={stats ? stats.repeat_customers : '—'}
+          hint={stats ? `${(Number(stats.repeat_rate) * 100).toFixed(0)}% of the base bought twice or more` : 'Needs reports.view'}
+          icon={Repeat}
+          tone="violet"
+        />
+        <Kpi
+          label="New this month"
+          value={stats ? stats.new_customers : '—'}
+          hint={stats ? 'Profiles created in the last 30 days' : 'Needs reports.view'}
+          icon={Plus}
+          tone="emerald"
+        />
+        <Kpi
+          label="Opted in"
+          value={rows.filter((r) => r.marketing_consent).length}
+          hint={rows.length ? `Of ${rows.length} on this page` : 'No rows on this page'}
+          icon={ShieldCheck}
+          tone="amber"
+        />
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="filters" style={{ marginBottom: 16 }}>
-          <input
-            placeholder="Name / phone / ID / email"
-            value={draft.q}
-            onChange={(e) => setDraft({ ...draft, q: e.target.value })}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } }}
-            style={{ minWidth: 240 }}
-          />
-          <input
-            placeholder="Min spend ₹"
-            value={draft.minSpent}
-            onChange={(e) => setDraft({ ...draft, minSpent: e.target.value })}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } }}
-          />
-          <select value={draft.recency} onChange={(e) => setDraft({ ...draft, recency: e.target.value })}>
-            <option value="">Last purchase: any time</option>
-            <option value="last:30">Purchased ≤ 30 days ago</option>
-            <option value="last:60">Purchased ≤ 60 days ago</option>
-            <option value="last:90">Purchased ≤ 90 days ago</option>
-            <option value="last:180">Purchased ≤ 180 days ago</option>
-            <option value="lapsed:90">Not purchased in 90 days</option>
-            <option value="lapsed:180">Not purchased in 180 days</option>
-            <option value="repeat">Repeat customers (2+ bills)</option>
-            <option value="custom">Custom date range…</option>
-          </select>
+      <CrmNav />
+
+      <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[240px] flex-1">
+            <label className="lbl">Search</label>
+            <input
+              placeholder="Name / phone / code / email"
+              value={draft.q}
+              onChange={(e) => setDraft({ ...draft, q: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  search();
+                }
+              }}
+            />
+          </div>
+          <div className="w-[130px]">
+            <label className="lbl">Min spend ₹</label>
+            <input
+              inputMode="numeric"
+              value={draft.minSpent}
+              onChange={(e) => setDraft({ ...draft, minSpent: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  search();
+                }
+              }}
+            />
+          </div>
+          <div className="w-[130px]">
+            <label className="lbl">Max spend ₹</label>
+            <input
+              inputMode="numeric"
+              value={draft.maxSpent}
+              onChange={(e) => setDraft({ ...draft, maxSpent: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  search();
+                }
+              }}
+            />
+          </div>
+          <div className="w-[240px]">
+            <label className="lbl">Last purchase</label>
+            <select value={draft.recency} onChange={(e) => setDraft({ ...draft, recency: e.target.value })}>
+              <option value="">Any time</option>
+              <option value="last:30">Bought within 30 days</option>
+              <option value="last:60">Bought within 60 days</option>
+              <option value="last:90">Bought within 90 days</option>
+              <option value="last:180">Bought within 180 days</option>
+              <option value="lapsed:90">Lapsed 90+ days</option>
+              <option value="lapsed:180">Lapsed 180+ days</option>
+              <option value="repeat">Repeat buyers (2+ bills)</option>
+              <option value="custom">Custom range…</option>
+            </select>
+          </div>
           {draft.recency === 'custom' && (
             <>
-              <input type="date" value={draft.lastFrom} onChange={(e) => setDraft({ ...draft, lastFrom: e.target.value })} title="From" />
-              <input type="date" value={draft.lastTo} onChange={(e) => setDraft({ ...draft, lastTo: e.target.value })} title="To" />
+              <div>
+                <label className="lbl">From</label>
+                <input
+                  type="date"
+                  value={draft.lastFrom}
+                  onChange={(e) => setDraft({ ...draft, lastFrom: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="lbl">To</label>
+                <input
+                  type="date"
+                  value={draft.lastTo}
+                  onChange={(e) => setDraft({ ...draft, lastTo: e.target.value })}
+                />
+              </div>
             </>
           )}
           <button type="button" className="btn primary" onClick={search}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon paths={ICONS.search} size={15} />Search</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Search className="h-3.5 w-3.5" />
+              Search
+            </span>
           </button>
           {hasFilters && (
-            <button type="button" className="btn ghost" style={{ minWidth: 80, fontSize: 12 }} onClick={clearAll}>Clear</button>
+            <button type="button" className="btn ghost" onClick={clearAll}>
+              <span className="inline-flex items-center gap-1.5">
+                <X className="h-3.5 w-3.5" />
+                Clear
+              </span>
+            </button>
           )}
         </div>
+      </div>
 
+      <div className="rounded-xl border border-slate-200/80 bg-white shadow-sm">
         {query.isLoading ? (
-          <div className="empty" style={{ padding: 40 }}>Loading customers…</div>
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading customers…
+          </div>
+        ) : query.isError ? (
+          <div className="m-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            Could not load customers. {(query.error as any)?.message || 'Check the API connection.'}
+          </div>
         ) : !rows.length ? (
-          <div className="empty" style={{ padding: 40 }}>No customers found.</div>
+          <div className="py-16 text-center">
+            <UsersRound className="mx-auto h-8 w-8 text-slate-300" />
+            <p className="mt-2 text-sm font-medium text-slate-700">
+              {hasFilters ? 'No customers match these filters.' : 'No customers yet.'}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {hasFilters
+                ? 'Widen the spend band or clear the recency filter.'
+                : 'Register the first customer to start tracking purchases and consent.'}
+            </p>
+          </div>
         ) : (
-          <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 10 }}>
-            <table className="tbl" style={{ width: '100%', margin: 0 }}>
-              <thead>
-                <tr style={{ background: 'var(--color-surface)' }}>
-                  <th style={{ width: 56 }}>S.No</th>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Email</th>
-                  <th>City</th>
-                  <th style={{ textAlign: 'right' }}>Purchases</th>
-                  <th style={{ textAlign: 'right' }}>Total Spent</th>
-                  <th>Consent</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((c: any, i: number) => (
-                  <tr key={c.id} className="row-clickable" onClick={() => setSelId(c.id)}>
-                    <td style={{ color: 'var(--color-muted)' }}>{(page - 1) * limit + i + 1}</td>
-                    <td><small style={{ color: 'var(--color-muted)' }}>{c.customer_code}</small></td>
-                    <td><strong>{c.name}</strong></td>
-                    <td>{c.phone}</td>
-                    <td>{c.email || '—'}</td>
-                    <td>{c.city || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{c.purchase_count}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--color-ink)', whiteSpace: 'nowrap' }}>{inr(c.total_spent_inr)}</td>
-                    <td>{c.marketing_consent ? <span className="badge ok">Opted in</span> : <span className="badge warn">No</span>}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn ghost xs"
-                        onClick={(e) => { e.stopPropagation(); setSelId(c.id); }}
-                      >
-                        View
-                      </button>
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/80 text-left">
+                    <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      #
+                    </th>
+                    <SortHead label="Code" column="customer_code" sort={sort} dir={dir} onSort={toggleSort} />
+                    <SortHead label="Name" column="name" sort={sort} dir={dir} onSort={toggleSort} />
+                    <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Contact
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      City
+                    </th>
+                    <SortHead
+                      label="Purchases"
+                      column="purchase_count"
+                      sort={sort}
+                      dir={dir}
+                      onSort={toggleSort}
+                      align="right"
+                    />
+                    <SortHead
+                      label="Total spent"
+                      column="total_spent_inr"
+                      sort={sort}
+                      dir={dir}
+                      onSort={toggleSort}
+                      align="right"
+                    />
+                    <SortHead
+                      label="Last purchase"
+                      column="last_purchase_at"
+                      sort={sort}
+                      dir={dir}
+                      onSort={toggleSort}
+                    />
+                    <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Consent
+                    </th>
+                    <th className="px-3 py-2.5" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {rows.map((customer, index) => (
+                    <tr
+                      key={customer.id}
+                      className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-brand-50/40"
+                      onClick={() => setSelectedId(customer.id)}
+                    >
+                      <td className="px-3 py-2.5 text-xs text-slate-400">{(page - 1) * limit + index + 1}</td>
+                      <td className="px-3 py-2.5 text-xs font-medium text-slate-500">{customer.customer_code}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="font-semibold text-slate-900">{customer.name}</div>
+                        <div className="text-[11px] text-slate-500">{addressOf(customer)}</div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="inline-flex items-center gap-1.5 text-slate-700">
+                          <Phone className="h-3 w-3 text-slate-400" />
+                          {customer.phone}
+                        </div>
+                        <div className="text-[11px] text-slate-500">{customer.email || '—'}</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-600">{customer.city || '—'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">
+                        {customer.purchase_count ?? 0}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-slate-900">
+                        {inr(customer.total_spent_inr)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">
+                        {customer.last_purchase_at ? prettyDate(customer.last_purchase_at) : 'Never'}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {customer.marketing_consent ? (
+                          <Badge variant="success">Opted in</Badge>
+                        ) : (
+                          <Badge variant="secondary">No</Badge>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <button
+                          type="button"
+                          className="btn ghost xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedId(customer.id);
+                          }}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-        {!query.isLoading && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13, color: 'var(--color-muted)' }}>
-              <span>Show</span>
-              <select value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }} style={{ width: 'auto', padding: '6px 10px' }}>
-                {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-              <span>per page</span>
-              {total > 0 && <span style={{ marginLeft: 6 }}>Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} customers</span>}
+            <div className="border-t border-slate-100 px-4 pb-4">
+              <Pagination
+                page={page}
+                limit={limit}
+                total={total}
+                noun="customers"
+                onPage={setPage}
+                onLimit={(next) => {
+                  setLimit(next);
+                  setPage(1);
+                }}
+              />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <button type="button" className="btn ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} style={{ padding: '6px 12px', fontSize: 13 }}>‹ Prev</button>
-              {pageNumbers.map((p, idx) => (
-                p === '...' ? (
-                  <span key={`gap-${idx}`} style={{ padding: '0 4px', color: 'var(--color-muted)' }}>…</span>
-                ) : (
-                  <button type="button" key={p} onClick={() => setPage(p)} className={p === page ? 'btn primary' : 'btn ghost'} style={{ padding: '6px 11px', fontSize: 13, minWidth: 34 }}>{p}</button>
-                )
-              ))}
-              <button type="button" className="btn ghost" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} style={{ padding: '6px 12px', fontSize: 13 }}>Next ›</button>
-            </div>
-          </div>
+          </>
         )}
       </div>
 
-      {newOpen && <NewCustomerModal onClose={closeNew} onSaved={() => { query.refetch(); }} />}
-      {selId && <CustomerDetailModal customerId={selId} onClose={() => setSelId(null)} onChanged={() => query.refetch()} />}
+      {newOpen && (
+        <NewCustomerModal
+          onClose={closeNew}
+          onSaved={() => query.refetch()}
+          onOpenExisting={(id) => {
+            query.refetch();
+            setSelectedId(id);
+          }}
+        />
+      )}
+
+      {selectedId && (
+        <CustomerDetailModal
+          customerId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onChanged={() => {
+            query.refetch();
+            report.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
 
 export default function Customers({ mode = 'view' }: { mode?: 'new' | 'view' }) {
   const navigate = useNavigate();
-  return (
-    <div className="page">
-      <CustomerList startNew={mode === 'new'} onNewClosed={() => navigate('/admin/customers')} />
-    </div>
-  );
+  return <CustomerList startNew={mode === 'new'} onNewClosed={() => navigate('/admin/customers')} />;
 }

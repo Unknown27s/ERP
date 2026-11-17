@@ -26,6 +26,7 @@ import Leads from './pages/admin/crm/Leads';
 import SupportCases from './pages/admin/crm/SupportCases';
 import Settings from './pages/admin/Settings';
 import AuditLogs from './pages/admin/AuditLogs';
+import Reports from './pages/admin/Reports';
 import ModulePlaceholder from './pages/admin/ModulePlaceholder';
 import HREmployees from './pages/admin/hr/Employees';
 import HRAttendance from './pages/admin/hr/Attendance';
@@ -579,7 +580,7 @@ export default function App() {
               {/* Authenticated Workspace: Operations Placeholders (Next Build Phases) */}
               <Route path="/admin/inventory" element={<AdminShell><Guard permission="inventory.view"><ModulePlaceholder module="Inventory" phase="Phase 4" /></Guard></AdminShell>} />
               <Route path="/admin/finance" element={<AdminShell><Guard permission="finance.view"><ModulePlaceholder module="Finance &amp; Accounting" phase="Phase 3" /></Guard></AdminShell>} />
-              <Route path="/admin/reports" element={<AdminShell><Guard permission="reports.view"><ModulePlaceholder module="Reports" phase="Phase 7" /></Guard></AdminShell>} />
+              <Route path="/admin/reports" element={<AdminShell><Guard permission="reports.view"><Reports /></Guard></AdminShell>} />
 
               {/* Authenticated Workspace: Administration & Auditing */}
               <Route path="/admin/settings" element={<AdminShell><Guard permission="company.manage"><Settings /></Guard></AdminShell>} />
