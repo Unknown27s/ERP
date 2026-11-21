@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { downloadCsv } from './export';
 
 export type ReportTask = {
   id?: string;
@@ -167,24 +168,13 @@ export function downloadEmployeeReportPdf(data: EmployeeReportData) {
 }
 
 export function downloadTasksCsv(tasks: ReportTask[], filename = 'tasks_completed.csv') {
-  const headers = ['Date', 'Task Title', 'Category Tag', 'Hours Spent', 'Status', 'Project / Reference', 'Description'];
-  const rows = tasks.map((t) => [
-    `"${t.work_date || ''}"`,
-    `"${(t.task_title || '').replace(/"/g, '""')}"`,
-    `"${(t.tag || '').replace(/"/g, '""')}"`,
-    t.hours_spent || 0,
-    `"${t.status || 'completed'}"`,
-    `"${(t.project_or_lead_ref || '').replace(/"/g, '""')}"`,
-    `"${(t.description || '').replace(/"/g, '""')}"`,
-  ]);
-
-  const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  downloadCsv<ReportTask>(filename, [
+    { header: 'Date', value: (t) => t.work_date },
+    { header: 'Task Title', value: (t) => t.task_title },
+    { header: 'Category Tag', value: (t) => t.tag },
+    { header: 'Hours Spent', value: (t) => t.hours_spent },
+    { header: 'Status', value: (t) => t.status || 'completed' },
+    { header: 'Project / Reference', value: (t) => t.project_or_lead_ref },
+    { header: 'Description', value: (t) => t.description },
+  ], tasks);
 }

@@ -183,12 +183,13 @@ router.get('/employees', requirePermission('hr.view'), async (req, res) => {
   if (department_id) { conds.push('e.department_id = ?'); args.push(department_id); }
   const rows = await all(
     `SELECT e.*, d.name AS department_name, g.name AS designation_name, b.name AS branch_name,
-            m.full_name AS manager_name
+            m.full_name AS manager_name, p.email AS linked_user_email
      FROM employees e
      LEFT JOIN departments d ON d.id = e.department_id
      LEFT JOIN designations g ON g.id = e.designation_id
      LEFT JOIN branches b ON b.id = e.branch_id
      LEFT JOIN employees m ON m.id = e.manager_id
+     LEFT JOIN profiles p ON p.user_id = e.user_id
      WHERE ${conds.join(' AND ')}
      ORDER BY (e.status = 'active') DESC, e.full_name`, ...args);
 
@@ -205,15 +206,34 @@ router.get('/employees', requirePermission('hr.view'), async (req, res) => {
   res.json({ data: rows });
 });
 
+/**
+ * Login accounts available for linking to an employee record.
+ * HR needs this list because the HR role does not automatically hold
+ * `staff.view`, and the employee form is where a self-service account is linked.
+ */
+router.get('/employees/linkable-users', requirePermission('hr.view'), async (req, res) => {
+  const rows = await all(
+    `SELECT p.user_id, p.email, p.display_name, p.role, r.name AS role_name,
+            e.id AS employee_id, e.emp_code, e.full_name AS employee_name
+     FROM profiles p
+     LEFT JOIN roles r ON r.id = p.role_id
+     LEFT JOIN employees e ON e.user_id = p.user_id AND e.shop_id = p.shop_id
+     WHERE p.shop_id = ? AND p.active = 1
+     ORDER BY p.display_name, p.email`,
+    req.user.shop_id);
+  res.json({ data: rows });
+});
+
 router.get('/employees/:id', requirePermission('hr.view'), async (req, res) => {
   const row = await get(
     `SELECT e.*, d.name AS department_name, g.name AS designation_name, b.name AS branch_name,
-            m.full_name AS manager_name
+            m.full_name AS manager_name, p.email AS linked_user_email
      FROM employees e
      LEFT JOIN departments d ON d.id = e.department_id
      LEFT JOIN designations g ON g.id = e.designation_id
      LEFT JOIN branches b ON b.id = e.branch_id
      LEFT JOIN employees m ON m.id = e.manager_id
+     LEFT JOIN profiles p ON p.user_id = e.user_id
      WHERE e.id = ? AND e.shop_id = ?`, req.params.id, req.user.shop_id);
   if (!row) return res.status(404).json({ error: 'not_found' });
 

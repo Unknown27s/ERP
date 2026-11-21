@@ -2,7 +2,9 @@
  * HR demo data — employees, departments, designations, holidays, leave,
  * attendance and two payroll runs (previous month paid, current month draft).
  *
- * Idempotent: if the shop already has employees this whole section is skipped.
+ * Idempotent: a populated directory and its payroll are never modified.
+ * Existing login links are backfilled by migration 0013 or managed in the UI.
+ *
  * Called by `seed.js` and `seed-demo.js` after the shop/users exist.
  */
 const { get, all, run, uid } = require('./db');
@@ -22,25 +24,25 @@ const DESIGNATIONS = [
 const STAFF = [
   {
     code: 'EMP-001', name: 'Meera Menon', dept: 'Administration', desig: 'General Manager', type: 'full_time',
-    join: '2019-04-01', status: 'active', phone: '+91 98450 10001', email: 'meera.menon@marvelsoftware.local',
+    join: '2019-04-01', status: 'active', phone: '+91 98450 10001', email: 'manager@marvelsoftware.local',
     pan: 'ABCPN1234F', bank: '50100234567891', ifsc: 'HDFC0001234',
     salary: { basic: 45000, hra: 18000, conv: 3000, special: 6000, incentive: 5000, pf: 1800, pt: 200, tds: 3000 },
   },
   {
     code: 'EMP-002', name: 'Priya Nair', dept: 'Sales', desig: 'Sales Executive', type: 'full_time',
-    join: '2021-06-15', status: 'active', phone: '+91 98450 10002', email: 'priya.nair@marvelsoftware.local',
+    join: '2021-06-15', status: 'active', phone: '+91 98450 10002', email: 'sales@marvelsoftware.local',
     pan: 'ABCPD2345G', bank: '50100234567892', ifsc: 'ICIC0004567',
     salary: { basic: 25000, hra: 10000, conv: 2000, special: 3000, incentive: 4000, pf: 1800, pt: 200, tds: 0 },
   },
   {
     code: 'EMP-003', name: 'Rahul Verma', dept: 'Finance', desig: 'Accounts Executive', type: 'full_time',
-    join: '2022-02-01', status: 'active', phone: '+91 98450 10003', email: 'rahul.verma@marvelsoftware.local',
+    join: '2022-02-01', status: 'active', phone: '+91 98450 10003', email: 'finance@marvelsoftware.local',
     pan: 'ABCJA3456H', bank: '50100234567893', ifsc: 'SBIN0007890',
     salary: { basic: 22000, hra: 8800, conv: 2000, special: 2000, incentive: 2500, pf: 1800, pt: 200, tds: 0 },
   },
   {
     code: 'EMP-004', name: 'Kiran Patel', dept: 'Stores', desig: 'Store Keeper', type: 'full_time',
-    join: '2020-09-10', status: 'active', phone: '+91 98450 10004', email: 'kiran.patel@marvelsoftware.local',
+    join: '2020-09-10', status: 'active', phone: '+91 98450 10004', email: 'store@marvelsoftware.local',
     pan: 'ABCLI4567J', bank: '50100234567894', ifsc: 'AXIS0002345',
     salary: { basic: 24000, hra: 9600, conv: 2000, special: 2500, incentive: 2000, pf: 1800, pt: 200, tds: 0 },
   },
@@ -62,7 +64,27 @@ const STAFF = [
     pan: 'ABCVR7890M', bank: '50100234567897', ifsc: 'HDFC0009012',
     salary: { basic: 21000, hra: 8400, conv: 2000, special: 2000, incentive: 2000, pf: 1800, pt: 200, tds: 0 },
   },
+  {
+    code: 'EMP-008', name: 'System Administrator', dept: 'Administration', desig: 'General Manager', type: 'full_time',
+    join: '2019-01-15', status: 'active', phone: '+91 98450 10008', email: 'admin@marvelsoftware.local',
+    pan: 'ABCSD8901N', bank: '50100234567898', ifsc: 'HDFC0002345',
+    salary: { basic: 60000, hra: 24000, conv: 3000, special: 8000, incentive: 5000, pf: 1800, pt: 200, tds: 5000 },
+  },
+  {
+    code: 'EMP-009', name: 'Anita Sharma', dept: 'Human Resources', desig: 'HR Manager', type: 'full_time',
+    join: '2020-06-01', status: 'active', phone: '+91 98450 10009', email: 'hr@marvelsoftware.local',
+    pan: 'ABCAS9012P', bank: '50100234567899', ifsc: 'ICIC0001234',
+    salary: { basic: 35000, hra: 14000, conv: 2500, special: 4000, incentive: 3000, pf: 1800, pt: 200, tds: 1500 },
+  },
+  {
+    code: 'EMP-010', name: 'Arjun Rao', dept: 'Operations', desig: 'Operations Executive', type: 'full_time',
+    join: '2022-03-15', status: 'active', phone: '+91 98450 10010', email: 'employee@marvelsoftware.local',
+    pan: 'ABCAU3456Q', bank: '50100234567900', ifsc: 'SBIN0004567',
+    salary: { basic: 24000, hra: 9600, conv: 2000, special: 2500, incentive: 2000, pf: 1800, pt: 200, tds: 0 },
+  },
 ];
+
+const FEMALE_CODES = new Set(['EMP-002', 'EMP-004', 'EMP-006', 'EMP-009']);
 
 const LEAVE_TYPES = [
   ['Casual Leave', 12, 1], ['Sick Leave', 12, 1], ['Earned Leave', 15, 1], ['Loss of Pay', 0, 0],
@@ -92,6 +114,62 @@ async function ensureLeaveType(shopId, name, quota, paid) {
   return get('SELECT * FROM leave_types WHERE id = ?', id);
 }
 
+async function profileByEmail(shopId, email) {
+  if (!email?.trim()) return null;
+  const matches = await all('SELECT user_id, email FROM profiles WHERE shop_id = ? AND lower(trim(email)) = lower(trim(?))', shopId, email);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+async function ensureSalary(shopId, employeeId, spec) {
+  const p = spec.salary;
+  await run(
+    `INSERT INTO salary_structures (id, shop_id, employee_id, effective_from, basic_inr, hra_inr,
+       conveyance_inr, special_allowance_inr, incentive_inr, pf_inr, esi_inr, professional_tax_inr, tds_inr)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (employee_id, effective_from) DO NOTHING`,
+    uid('sal'), shopId, employeeId, spec.join, p.basic, p.hra, p.conv, p.special, p.incentive, p.pf, 0, p.pt, p.tds);
+}
+
+async function ensureLeaveBalances(shopId, employeeId, types) {
+  const year = new Date().getFullYear();
+  for (const [name, quota] of LEAVE_TYPES) {
+    await run(
+      `INSERT INTO leave_balances (id, shop_id, employee_id, leave_type_id, year, entitled, used)
+       VALUES (?,?,?,?,?,?,0) ON CONFLICT (employee_id, leave_type_id, year) DO NOTHING`,
+      uid('lvb'), shopId, employeeId, types[name].id, year, quota);
+  }
+}
+
+/** Create demo staff only after the caller has verified an empty directory. */
+async function ensureDemoStaff(shop, exitDate) {
+  const departments = {};
+  for (const name of DEPARTMENTS) departments[name] = await ensureDepartment(shop.id, name);
+  const designations = {};
+  for (const [name, grade] of DESIGNATIONS) designations[name] = await ensureDesignation(shop.id, name, grade);
+  const types = {};
+  for (const [name, quota, paid] of LEAVE_TYPES) types[name] = await ensureLeaveType(shop.id, name, quota, paid);
+
+  const byCode = {};
+  for (const s of STAFF) {
+    const profile = await profileByEmail(shop.id, s.email);
+
+    const id = uid('emp');
+    await run(
+      `INSERT INTO employees (id, shop_id, user_id, emp_code, full_name, phone, email, gender, address,
+         department_id, designation_id, employment_type, joining_date, exit_date, status,
+         bank_account, bank_ifsc, pan)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      id, shop.id, profile ? profile.user_id : null, s.code, s.name, s.phone, s.email,
+      FEMALE_CODES.has(s.code) ? 'female' : 'male', 'Bengaluru, Karnataka',
+      departments[s.dept].id, designations[s.desig].id, s.type, s.join,
+      s.status === 'exited' ? exitDate : null, s.status, s.bank, s.ifsc, s.pan);
+    await ensureSalary(shop.id, id, s);
+    if (s.status !== 'exited') await ensureLeaveBalances(shop.id, id, types);
+    byCode[s.code] = { ...s, id };
+  }
+
+  return byCode;
+}
+
 const HOLIDAYS = [
   ['01-26', 'Republic Day', 'public'],
   ['03-04', 'Holi', 'festival'],
@@ -119,9 +197,9 @@ async function createPayrollRun(shop, adminId, period, status) {
   let payroll = await get('SELECT * FROM payroll_runs WHERE shop_id = ? AND period = ?', shop.id, period);
   if (payroll) {
     const [slips] = await all('SELECT COUNT(*)::int AS c FROM payslips WHERE payroll_run_id = ?', payroll.id);
-    // Existing drafts with no payslips (e.g. created before salary structures
-    // existed) are filled; locked/paid runs are never touched.
-    if (slips.c > 0 || payroll.status !== 'draft') return { run: payroll, created: false, net: 0 };
+    // Existing payslips are never deleted or regenerated by the demo seed.
+    if (payroll.status !== 'draft') return { run: payroll, created: false, net: 0 };
+    if (slips.c > 0) return { run: payroll, created: false, net: 0 };
     await run('UPDATE payroll_runs SET working_days = ? WHERE id = ?', workingDays, payroll.id);
   } else {
     const id = uid('pay');
@@ -191,23 +269,9 @@ async function createPayrollRun(shop, adminId, period, status) {
 async function seedHrDemo(shop, admin) {
   const existing = await get('SELECT COUNT(*)::int AS c FROM employees WHERE shop_id = ?', shop.id);
   if (existing.c > 0) {
-    console.log(`[seed-hr] ${existing.c} employees already present - keeping HR demo data`);
-    // Repair an empty draft run if one was created before salary structures existed.
-    const empties = await all(
-      `SELECT pr.period FROM payroll_runs pr
-       WHERE pr.shop_id = ? AND pr.status = 'draft'
-         AND NOT EXISTS (SELECT 1 FROM payslips ps WHERE ps.payroll_run_id = pr.id)`, shop.id);
-    for (const e of empties) await createPayrollRun(shop, admin.user_id, e.period, 'draft');
-    if (empties.length) console.log(`[seed-hr] filled ${empties.length} empty draft payroll run(s)`);
+    console.log(`[seed-hr] ${existing.c} employees already present - keeping directory and payroll unchanged`);
     return;
   }
-
-  const departments = {};
-  for (const name of DEPARTMENTS) departments[name] = await ensureDepartment(shop.id, name);
-  const designations = {};
-  for (const [name, grade] of DESIGNATIONS) designations[name] = await ensureDesignation(shop.id, name, grade);
-  const types = {};
-  for (const [name, quota, paid] of LEAVE_TYPES) types[name] = await ensureLeaveType(shop.id, name, quota, paid);
 
   const now = new Date();
   const year = now.getFullYear();
@@ -216,6 +280,8 @@ async function seedHrDemo(shop, admin) {
   const prevPeriod = periodOf(prevMonth);
   const prevDays = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).getDate();
   const exitDate = `${prevPeriod}-${pad(prevDays)}`;
+
+  const empByCode = await ensureDemoStaff(shop, exitDate);
 
   // Holidays for this year and next.
   for (const y of [year, year + 1]) {
@@ -229,51 +295,17 @@ async function seedHrDemo(shop, admin) {
     }
   }
 
-  // Employees
-  const empByCode = {};
-  for (const s of STAFF) {
-    const id = uid('emp');
-    await run(
-      `INSERT INTO employees (id, shop_id, emp_code, full_name, phone, email, gender, address,
-         department_id, designation_id, employment_type, joining_date, exit_date, status,
-         bank_account, bank_ifsc, pan)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      id, shop.id, s.code, s.name, s.phone, s.email, s.code === 'EMP-002' || s.code === 'EMP-004' || s.code === 'EMP-006' ? 'female' : 'male',
-      'Bengaluru, Karnataka', departments[s.dept].id, designations[s.desig].id, s.type, s.join,
-      s.status === 'exited' ? exitDate : null, s.status, s.bank, s.ifsc, s.pan);
-    empByCode[s.code] = { ...s, id };
-  }
-
-  // Salary structures (effective from joining date; one per employee)
-  for (const s of Object.values(empByCode)) {
-    const p = s.salary;
-    await run(
-      `INSERT INTO salary_structures (id, shop_id, employee_id, effective_from, basic_inr, hra_inr,
-         conveyance_inr, special_allowance_inr, incentive_inr, pf_inr, esi_inr, professional_tax_inr, tds_inr)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (employee_id, effective_from) DO NOTHING`,
-      uid('sal'), shop.id, s.id, s.join, p.basic, p.hra, p.conv, p.special, p.incentive, p.pf, 0, p.pt, p.tds);
-  }
-
-  // Leave balances for the current year
-  for (const emp of Object.values(empByCode).filter((e) => e.status !== 'exited')) {
-    for (const [name, quota] of LEAVE_TYPES) {
-      await run(
-        `INSERT INTO leave_balances (id, shop_id, employee_id, leave_type_id, year, entitled, used)
-         VALUES (?,?,?,?,?,?,0) ON CONFLICT (employee_id, leave_type_id, year) DO NOTHING`,
-        uid('lvb'), shop.id, emp.id, types[name].id, year, quota);
-    }
-  }
-
   async function addLeave(empCode, typeName, from, to, status, note) {
     const emp = empByCode[empCode];
-    const type = types[typeName];
+    const leaveType = await get('SELECT * FROM leave_types WHERE shop_id = ? AND name = ?', shop.id, typeName);
+    if (!emp || !leaveType) return null;
     const days = Math.round((Date.parse(`${to}T00:00:00`) - Date.parse(`${from}T00:00:00`)) / 86400000) + 1;
     const id = uid('lvr');
     await run(
       `INSERT INTO leave_requests (id, shop_id, employee_id, leave_type_id, from_date, to_date, days, reason,
          status, decided_by, decided_at, decision_note)
        VALUES (?,?,?,?,?,?,?,?,?,?,${status === 'pending' ? 'NULL' : 'now()'},?)`,
-      id, shop.id, emp.id, type.id, from, to, days, note, status,
+      id, shop.id, emp.id, leaveType.id, from, to, days, note, status,
       status === 'pending' ? null : admin.user_id, status === 'pending' ? null : note);
     if (status === 'approved') {
       const ly = Number(from.slice(0, 4));
@@ -282,7 +314,7 @@ async function seedHrDemo(shop, admin) {
          VALUES (?,?,?,?,?,?,?)
          ON CONFLICT (employee_id, leave_type_id, year)
          DO UPDATE SET used = leave_balances.used + EXCLUDED.used`,
-        uid('lvb'), shop.id, emp.id, type.id, ly, 0, days);
+        uid('lvb'), shop.id, emp.id, leaveType.id, ly, 0, days);
       let d = new Date(`${from}T00:00:00`);
       const end = new Date(`${to}T00:00:00`);
       while (d <= end) {

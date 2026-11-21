@@ -49,7 +49,7 @@ const MODULE_DATA: Record<string, { purpose: string; bullets: string[] }> = {
   },
 };
 
-export default function ModulePlaceholder({ module }: { module: string; phase?: string }) {
+export default function ModulePlaceholder({ module, phase }: { module: string; phase?: string }) {
   const info = MODULE_DATA[module] || {
     purpose: 'This module is scheduled on the operational roadmap.',
     bullets: [],
@@ -62,12 +62,16 @@ export default function ModulePlaceholder({ module }: { module: string; phase?: 
           <div className="flex items-center gap-2">
             <Badge variant="secondary" className="gap-1.5 px-3 py-1 text-xs">
               <Clock className="w-3.5 h-3.5 text-slate-500" />
-              <span>Module In Progress</span>
+              <span>Planned module{phase ? ` · ${phase}` : ''}</span>
             </Badge>
           </div>
           <div>
             <CardTitle className="text-2xl font-bold text-slate-900">{module}</CardTitle>
             <CardDescription className="text-sm text-slate-500 mt-1">{info.purpose}</CardDescription>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+              This module is on the roadmap and is not enabled in this demo. The working demo covers
+              Dashboard, Self-Service, Staff, HR, CRM, Customers, Sales, Reports and Audit.
+            </p>
           </div>
         </CardHeader>
 

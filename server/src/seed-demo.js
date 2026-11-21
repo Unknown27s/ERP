@@ -20,11 +20,17 @@ const { seedHrDemo } = require('./seed-hr');
 const PURITY_FACTORS = { '24K': 1.0, '22K': 0.916, '18K': 0.75, '14K': 0.585 };
 
 async function ensureShop() {
-  let shop = await get('SELECT * FROM shops LIMIT 1');
+  const configured = process.env.COMPANY_NAME || 'MarvelSoftware';
+  let shop = await get('SELECT * FROM shops WHERE name = ? ORDER BY id LIMIT 1', configured);
+  if (!shop) {
+    shop = await get(`SELECT s.* FROM shops s JOIN profiles p ON p.shop_id = s.id
+      WHERE p.is_primary = 1 ORDER BY s.id LIMIT 1`);
+  }
+  if (!shop) shop = await get('SELECT * FROM shops ORDER BY id LIMIT 1');
   if (!shop) {
     const id = uid('shop');
     await run(`INSERT INTO shops (id, name, timezone, currency) VALUES (?,?,?,?)`,
-      id, 'Shree Gold Palace', 'Asia/Kolkata', 'INR');
+      id, configured, 'Asia/Kolkata', 'INR');
     await run(`INSERT INTO branches (id, shop_id, name, address) VALUES (?,?,?,?)`,
       uid('br'), id, 'Main Store', 'MG Road, Bengaluru');
     shop = await get('SELECT * FROM shops WHERE id=?', id);
@@ -32,12 +38,15 @@ async function ensureShop() {
   return shop;
 }
 
-async function ensureUser(shop, email, role, name, pass, extra = {}) {
+async function ensureUser(shop, email, roleName, name, pass, extra = {}) {
   const ex = await get('SELECT * FROM profiles WHERE email=?', email);
   if (ex) return ex;
+  const role = await get('SELECT * FROM roles WHERE shop_id = ? AND name = ?', shop.id, roleName);
+  if (!role) throw new Error(`role ${roleName} missing — run migrations and seed first`);
   const id = uid('usr');
-  await run(`INSERT INTO profiles (user_id, shop_id, role, display_name, email, phone, password_hash, active, is_primary) VALUES (?,?,?,?,?,?,?,?,?)`,
-    id, shop.id, role, name, email, extra.phone || null, bcrypt.hashSync(pass, 10), 1, extra.is_primary ? 1 : 0);
+  const legacyRole = roleName === 'Administrator' ? 'admin' : 'staff';
+  await run(`INSERT INTO profiles (user_id, shop_id, role, role_id, display_name, email, phone, password_hash, active, is_primary) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    id, shop.id, legacyRole, role.id, name, email, extra.phone || null, bcrypt.hashSync(pass, 10), 1, extra.is_primary ? 1 : 0);
   return get('SELECT * FROM profiles WHERE user_id=?', id);
 }
 
@@ -99,7 +108,7 @@ async function seedProducts(shopId) {
     console.log(`[seed-demo] ${available.length} available products already present`);
     return available;
   }
-  if (!(await get('SELECT COUNT(*) n FROM categories')).n) {
+  if (!(await get('SELECT COUNT(*) n FROM categories WHERE shop_id = ?', shopId)).n) {
     const cats = [['Rings', 'rings', 'RNG'], ['Necklaces', 'necklaces', 'NCK'], ['Bangles', 'bangles', 'BNG'], ['Chains', 'chains', 'CHN'],
       ['Earrings', 'earrings', 'ERG'], ['Bracelets', 'bracelets', 'BRC'], ['Pendants', 'pendants', 'PND'], ['Coins', 'coins', 'CON']];
     for (const [name, slug, pre] of cats) {
@@ -271,8 +280,16 @@ async function seedSales(shopId, adminId, billingId, rateInfo, productPool) {
 async function main() {
   await initDb();
   const shop = await ensureShop();
-  const admin = await ensureUser(shop, 'admin@shop.local', 'admin', 'Shop Admin', 'Admin@123', { is_primary: true });
-  const billing = await ensureUser(shop, 'billing@shop.local', 'billing', 'Billing Staff', 'Billing@123');
+  const admin = await get(
+    `SELECT p.* FROM profiles p JOIN roles r ON r.id = p.role_id
+     WHERE p.shop_id = ? AND r.name = 'Administrator'
+     ORDER BY p.is_primary DESC, p.email LIMIT 1`, shop.id)
+    || await ensureUser(shop, 'admin@marvelsoftware.local', 'Administrator', 'System Administrator', 'Admin@123', { is_primary: true, phone: '+91 90000 00001' });
+  const billing = await get(
+    `SELECT p.* FROM profiles p JOIN roles r ON r.id = p.role_id
+     WHERE p.shop_id = ? AND r.name IN ('Sales','Finance')
+     ORDER BY CASE r.name WHEN 'Sales' THEN 0 ELSE 1 END, p.email LIMIT 1`, shop.id)
+    || admin;
 
   const rateInfo = await seedRates(admin.user_id);
   const pool = await seedProducts(shop.id);
@@ -281,7 +298,7 @@ async function main() {
   await seedHrDemo(shop, admin);
 
   const rev = await get(`SELECT COUNT(*) c, COALESCE(SUM(total_inr),0) s FROM sales WHERE shop_id=? AND status='finalized'`, shop.id);
-  console.log(`[seed-demo] done — ${rev.c} finalized bills, ${Math.round(Number(rev.s)).toLocaleString('en-IN')} total revenue. Logins: admin@shop.local/Admin@123, billing@shop.local/Billing@123`);
+  console.log(`[seed-demo] done — ${rev.c} finalized bills, ${Math.round(Number(rev.s)).toLocaleString('en-IN')} total revenue. Logins: admin@marvelsoftware.local/Admin@123, billing user ${billing.email}`);
   await closeDb();
 }
 

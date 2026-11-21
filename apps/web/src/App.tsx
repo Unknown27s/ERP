@@ -149,7 +149,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         {/* Brand Header */}
         <div className="p-4 border-b border-slate-800/80 flex items-center justify-between">
           <Link to="/admin" onClick={closeSidebar} className="flex items-center gap-3 group">
-            <div className="w-9 h-9 rounded-xl bg-white p-1 shadow-md shadow-black/30 flex items-center justify-center shrink-0">
+            <div className="w-24 h-11 rounded-xl bg-white px-1.5 py-1 shadow-md shadow-black/30 flex items-center justify-center shrink-0">
               <img src="/logo.avif" alt="Logo" className="w-full h-full object-contain" />
             </div>
             <div className="min-w-0">

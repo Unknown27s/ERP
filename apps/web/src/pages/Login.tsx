@@ -97,8 +97,8 @@ export default function Login() {
         {/* Brand Header & Value Stack */}
         <div className="relative z-10">
           {/* Logo & Product Monogram */}
-          <div className="flex items-center gap-3.5 mb-8">
-            <div className="w-11 h-11 rounded-xl bg-white p-1.5 shadow-lg shadow-black/20 flex items-center justify-center">
+          <div className="flex items-center gap-4 mb-8">
+            <div className="w-44 h-20 sm:w-56 sm:h-24 rounded-2xl bg-white px-3 py-2 shadow-lg shadow-black/20 flex items-center justify-center shrink-0">
               <img src="/logo.avif" alt="Logo" className="w-full h-full object-contain" />
             </div>
             <div>

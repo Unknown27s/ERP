@@ -61,6 +61,18 @@ type Employee = {
   pan: string | null;
   bank_account: string | null;
   bank_ifsc: string | null;
+  user_id: string | null;
+  linked_user_email?: string | null;
+};
+
+type LinkableUser = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  role_name: string | null;
+  employee_id: string | null;
+  emp_code: string | null;
+  employee_name: string | null;
 };
 
 type Lookup = { id: string; name: string; grade?: string | null };
@@ -81,6 +93,7 @@ const EMPTY_FORM = {
   pan: '',
   bank_account: '',
   bank_ifsc: '',
+  user_id: '',
 };
 
 const GENDERS: Array<[string, string]> = [
@@ -126,17 +139,19 @@ export default function HREmployees() {
 
   const depts = useQuery({ queryKey: ['hr-departments'], queryFn: () => api.get('/hr/departments') });
   const desigs = useQuery({ queryKey: ['hr-designations'], queryFn: () => api.get('/hr/designations') });
+  const logins = useQuery({ queryKey: ['hr-linkable-users'], queryFn: () => api.get('/hr/employees/linkable-users') });
   const overview = useHrOverview();
 
   const employees: Employee[] = list.data?.data || [];
   const everyone: Employee[] = allQuery.data?.data || [];
   const departments: Lookup[] = depts.data?.data || [];
   const designations: Lookup[] = desigs.data?.data || [];
+  const linkableUsers: LinkableUser[] = logins.data?.data || [];
 
   const countOf = (s: string) =>
     allQuery.isLoading ? '—' : String(everyone.filter((e) => e.status === s).length);
 
-  const refresh = () => Promise.all([list.refetch(), depts.refetch(), desigs.refetch()]);
+  const refresh = () => Promise.all([list.refetch(), allQuery.refetch(), depts.refetch(), desigs.refetch(), logins.refetch()]);
 
   const setField = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const reset = () => {
@@ -186,6 +201,7 @@ export default function HREmployees() {
       pan: e.pan || '',
       bank_account: e.bank_account || '',
       bank_ifsc: e.bank_ifsc || '',
+      user_id: e.user_id || '',
     });
     setShowForm(true);
   };
@@ -270,6 +286,7 @@ export default function HREmployees() {
               <tr>
                 <th className="py-3 px-4">Code</th>
                 <th className="py-3 px-4">Employee</th>
+                <th className="py-3 px-4">Login</th>
                 <th className="py-3 px-4">Department &amp; Title</th>
                 <th className="py-3 px-4">Joined Date</th>
                 <th className="py-3 px-4">Status</th>
@@ -279,14 +296,14 @@ export default function HREmployees() {
             <tbody className="divide-y divide-slate-100">
               {list.isLoading && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     Loading employee directory…
                   </td>
                 </tr>
               )}
               {!list.isLoading && employees.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     No employees found matching filter criteria.
                   </td>
                 </tr>
@@ -300,6 +317,16 @@ export default function HREmployees() {
                       {e.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{e.email}</span>}
                       {e.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{e.phone}</span>}
                     </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    {e.linked_user_email ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                        <CheckCircle2 className="w-3 h-3" />
+                        {e.linked_user_email}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-medium text-amber-600">Not linked</span>
+                    )}
                   </td>
                   <td className="py-3 px-4">
                     <div className="text-slate-800 font-medium">{e.department_name || '—'}</div>
@@ -401,6 +428,30 @@ export default function HREmployees() {
                     onChange={(e) => setField('email', e.target.value)}
                     placeholder="priya@company.com"
                   />
+                </div>
+
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-semibold text-slate-700">Linked login account</label>
+                  <select
+                    value={form.user_id}
+                    onChange={(e) => setField('user_id', e.target.value)}
+                    className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  >
+                    <option value="">Not linked — admin only</option>
+                    {linkableUsers.map((u) => {
+                      const takenByOther = Boolean(u.employee_id && u.employee_id !== editId);
+                      return (
+                        <option key={u.user_id} value={u.user_id} disabled={takenByOther}>
+                          {u.display_name} · {u.email}
+                          {u.role_name ? ` (${u.role_name})` : ''}
+                          {takenByOther ? ` — linked to ${u.emp_code}` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="text-[11px] text-slate-400">
+                    The selected login gets its own My Profile, tasks, leave and payslip records.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
