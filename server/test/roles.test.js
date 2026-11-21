@@ -86,9 +86,6 @@ test('roles: billing blocked from admin endpoints, admin allowed', async () => {
     ['GET', '/admin/staff', null],
     ['POST', '/admin/staff', { name: 'Z', email: 'z@z.z', password: 'Password1' }],
     ['GET', '/audit-logs', null],
-    ['GET', '/reports/sales', null],
-    ['POST', '/offers', { code: 'X' }],
-    ['POST', '/campaigns', { name: 'X', template: 'Y' }],
   ];
   for (const [m, p, body] of blocked) {
     const r = await api(m, p, billTok, body);
@@ -98,6 +95,16 @@ test('roles: billing blocked from admin endpoints, admin allowed', async () => {
   assert.equal(ok.status, 200);
   const bc = await api('GET', `/products/barcode/${barcodeValue}`, billTok);
   assert.equal(bc.status, 200);
+  const report = await api('GET', '/reports/sales', billTok);
+  assert.equal(report.status, 200);
+  assert.equal(report.body.data.gross_profit_estimate, null);
+  for (const [path, body] of [
+    ['/offers', { code: 'X' }],
+    ['/campaigns', { name: 'X', template: 'Y' }],
+  ]) {
+    const result = await api('POST', path, billTok, body);
+    assert.notEqual(result.status, 403, `billing should have crm.manage for ${path}`);
+  }
 });
 
 test('single primary admin: create forces billing role; primary cannot be deactivated', async () => {

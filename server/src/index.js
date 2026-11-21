@@ -60,12 +60,88 @@ app.use(morgan(':method :clean-url :status :res[content-length] - :response-time
 // Schema is ensured via app.ready (awaited on boot and in tests).
 app.ready = initDb();
 
+// Public preview roster for the sign-in screen. It lists the existing seeded
+// person accounts so a reviewer can pick a real login instead of a separate
+// "preview@" mailbox. Enable explicitly with PREVIEW_LOGIN=1; override the roster with
+// PREVIEW_EMAILS=a@x,b@y and the passwords with PREVIEW_PASSWORDS=a@x:pass,...
+//
+// Preview mode intentionally exposes these demo credentials over the public
+// /api/config endpoint. Never enable it on a deployment with real staff credentials.
+const PREVIEW_EMAILS = [
+  'admin@marvelsoftware.local',
+  'manager@marvelsoftware.local',
+  'hr@marvelsoftware.local',
+  'finance@marvelsoftware.local',
+  'store@marvelsoftware.local',
+  'sales@marvelsoftware.local',
+  'employee@marvelsoftware.local',
+];
+const PREVIEW_PASSWORDS = {
+  'admin@marvelsoftware.local': 'Admin@123',
+  'manager@marvelsoftware.local': 'Manager@123',
+  'hr@marvelsoftware.local': 'Hr@12345',
+  'finance@marvelsoftware.local': 'Finance@123',
+  'store@marvelsoftware.local': 'Store@123',
+  'sales@marvelsoftware.local': 'Sales@123',
+  'employee@marvelsoftware.local': 'Employee@123',
+};
+const PREVIEW_ROLE_ORDER = ['Administrator', 'Manager', 'HR', 'Finance', 'Store', 'Sales', 'Employee'];
+
+/** env override: PREVIEW_PASSWORDS="a@x:pass,b@y:pass" */
+function previewPasswords() {
+  const overrides = {};
+  for (const pair of String(process.env.PREVIEW_PASSWORDS || '').split(',')) {
+    const idx = pair.indexOf(':');
+    if (idx <= 0) continue;
+    overrides[pair.slice(0, idx).trim().toLowerCase()] = pair.slice(idx + 1);
+  }
+  return { ...PREVIEW_PASSWORDS, ...overrides };
+}
+
+async function loadPreviewAccounts() {
+  if (process.env.PREVIEW_LOGIN !== '1') return [];
+  const emails = (process.env.PREVIEW_EMAILS || PREVIEW_EMAILS.join(','))
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (!emails.length) return [];
+  const passwords = previewPasswords();
+  try {
+    const rows = await all(
+      `SELECT p.display_name, p.email, COALESCE(r.name, p.role) AS role_name
+         FROM profiles p LEFT JOIN roles r ON r.id = p.role_id
+        WHERE p.active = 1 AND lower(p.email) IN (${emails.map(() => '?').join(',')})`,
+      ...emails
+    );
+    rows.sort((a, b) => {
+      const ai = PREVIEW_ROLE_ORDER.indexOf(a.role_name);
+      const bi = PREVIEW_ROLE_ORDER.indexOf(b.role_name);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) || String(a.display_name).localeCompare(String(b.display_name));
+    });
+    return rows.map((r) => {
+      const email = String(r.email).toLowerCase();
+      return {
+        name: r.display_name,
+        email: r.email,
+        role: r.role_name,
+        // Present only for the seeded demo accounts or PREVIEW_PASSWORDS.
+        password: passwords[email],
+      };
+    });
+  } catch (e) {
+    console.error('[config] preview roster unavailable:', e.message);
+    return [];
+  }
+}
+
 // Public branding only — no business data. The browser needs this before login
 // so a rename in Settings is reflected immediately.
 app.get('/api/config', async (req, res, next) => {
   try {
+    const accounts = await loadPreviewAccounts();
+    const preview = { enabled: accounts.length > 0, accounts };
     const shop = await get('SELECT id FROM shops ORDER BY id LIMIT 1');
-    if (!shop) return res.json({ data: { product_name: 'MarvelSoftware', company_name: 'MarvelSoftware' } });
+    if (!shop) return res.json({ data: { product_name: 'MarvelSoftware', company_name: 'MarvelSoftware', preview } });
     const { getSettings } = require('./routes/admin');
     const s = await getSettings(shop.id);
     res.json({
@@ -74,6 +150,7 @@ app.get('/api/config', async (req, res, next) => {
         company_name: s.company_name || s.shop_name || 'MarvelSoftware',
         timezone: s.timezone,
         currency: s.currency,
+        preview,
       },
     });
   } catch (e) { next(e); }

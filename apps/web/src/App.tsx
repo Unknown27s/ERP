@@ -13,8 +13,8 @@
  * ==============================================================================
  */
 
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Link, NavLink, Navigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth, can } from './hooks/auth';
 import { BrandingProvider, useBranding } from './hooks/branding';
@@ -34,6 +34,7 @@ import HRLeaves from './pages/admin/hr/Leaves';
 import HRPayroll from './pages/admin/hr/Payroll';
 import EmployeePortal from './pages/employee/EmployeePortal';
 import AdminBreadcrumbs from './components/AdminBreadcrumbs';
+import { ToastProvider } from './components/ui/Toast';
 import {
   LayoutDashboard,
   Users,
@@ -61,6 +62,153 @@ import {
 } from 'lucide-react';
 
 const qc = new QueryClient();
+
+/* ── 0. Global Quick Search Catalog ─────────────────────────────────────────── */
+
+type SearchEntry = {
+  to: string;
+  label: string;
+  section: string;
+  icon: React.ComponentType<{ className?: string }>;
+  permission?: string;
+};
+
+const SEARCH_CATALOG: SearchEntry[] = [
+  { to: '/admin', label: 'Overview', section: 'Workspace', icon: LayoutDashboard },
+  { to: '/employee', label: 'My Profile', section: 'My Workspace', icon: User },
+  { to: '/employee/tasks', label: 'My Tasks & Log', section: 'My Workspace', icon: CheckCircle2 },
+  { to: '/employee/leaves', label: 'My Leaves', section: 'My Workspace', icon: CalendarRange },
+  { to: '/employee/payslips', label: 'My Payslips', section: 'My Workspace', icon: Banknote },
+  { to: '/employee/reports', label: 'My Reports', section: 'My Workspace', icon: BarChart3 },
+  { to: '/admin/staff', label: 'Users', section: 'Staff & Access', icon: Users, permission: 'staff.view' },
+  { to: '/admin/staff/roles', label: 'Roles & Permissions', section: 'Staff & Access', icon: ShieldCheck, permission: 'staff.view' },
+  { to: '/admin/staff/departments', label: 'Departments', section: 'Staff & Access', icon: Building2, permission: 'staff.view' },
+  { to: '/admin/staff/designations', label: 'Designations', section: 'Staff & Access', icon: Briefcase, permission: 'staff.view' },
+  { to: '/admin/hr/employees', label: 'Employees', section: 'Human Resources', icon: UserCheck, permission: 'hr.view' },
+  { to: '/admin/hr/attendance', label: 'Attendance', section: 'Human Resources', icon: CalendarClock, permission: 'hr.view' },
+  { to: '/admin/hr/leaves', label: 'Leaves & Holidays', section: 'Human Resources', icon: CalendarRange, permission: 'leave.view' },
+  { to: '/admin/hr/payroll', label: 'Payroll', section: 'Human Resources', icon: Banknote, permission: 'payroll.view' },
+  { to: '/admin/crm/leads', label: 'Leads & Pipeline', section: 'CRM & Sales', icon: Target, permission: 'crm.view' },
+  { to: '/admin/customers', label: 'Customers', section: 'CRM & Sales', icon: UsersRound, permission: 'crm.view' },
+  { to: '/admin/crm/support-cases', label: 'Support Cases', section: 'CRM & Sales', icon: LifeBuoy, permission: 'crm.view' },
+  { to: '/admin/inventory', label: 'Inventory & Stock', section: 'Operations', icon: Boxes, permission: 'inventory.view' },
+  { to: '/admin/finance', label: 'Finance & Books', section: 'Operations', icon: Wallet, permission: 'finance.view' },
+  { to: '/admin/reports', label: 'Reports', section: 'Operations', icon: BarChart3, permission: 'reports.view' },
+  { to: '/admin/settings', label: 'Company Settings', section: 'Settings & Audit', icon: SettingsIcon, permission: 'company.manage' },
+  { to: '/admin/audit', label: 'Audit Trail', section: 'Settings & Audit', icon: History, permission: 'audit.view' },
+];
+
+function QuickSearch({ canAccess }: { canAccess: (permission?: string) => boolean }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setOpen((v) => !v);
+      } else if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    const id = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return SEARCH_CATALOG.filter(
+      (item) =>
+        canAccess(item.permission) &&
+        (q === '' || item.label.toLowerCase().includes(q) || item.section.toLowerCase().includes(q))
+    );
+  }, [query, canAccess]);
+
+  const go = (to: string) => {
+    setOpen(false);
+    navigate(to);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100/80 border border-slate-200/80 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+        aria-label="Open quick search"
+      >
+        <Search className="w-3.5 h-3.5 text-slate-400" />
+        <span>Quick search…</span>
+        <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-400">
+          ⌘K
+        </kbd>
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-[150] flex items-start justify-center bg-slate-950/50 px-4 pt-24 backdrop-blur-sm"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 border-b border-slate-100 px-4">
+              <Search className="h-4 w-4 shrink-0 text-slate-400" />
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && results[0]) go(results[0].to);
+                }}
+                placeholder="Search pages and actions…"
+                className="h-11 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+              />
+              <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-mono text-slate-400">
+                Esc
+              </kbd>
+            </div>
+            <div className="max-h-72 overflow-y-auto py-1">
+              {results.length === 0 ? (
+                <p className="px-4 py-8 text-center text-xs text-slate-400">No matching pages.</p>
+              ) : (
+                results.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.to}
+                      type="button"
+                      onClick={() => go(item.to)}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-slate-50"
+                    >
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                        <Icon className="h-3.5 w-3.5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-semibold text-slate-800">{item.label}</span>
+                        <span className="block truncate text-[10px] text-slate-400">{item.section}</span>
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 /* ── 1. Access Control & Permission Guards ──────────────────────────────────── */
 
@@ -600,13 +748,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 
           <div className="flex items-center gap-3">
             {/* Quick Search Shortcut Display */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100/80 border border-slate-200/80 text-xs text-slate-500">
-              <Search className="w-3.5 h-3.5 text-slate-400" />
-              <span>Quick search…</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-[10px] font-mono text-slate-400">
-                ⌘K
-              </kbd>
-            </div>
+            <QuickSearch canAccess={(permission) => !permission || canDo(permission)} />
 
             {/* Current Active Role Badge */}
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-medium">
@@ -641,10 +783,11 @@ function AdminShell({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
-      <BrandingProvider>
-        <AuthProvider>
-          <BrowserRouter>
-            <Routes>
+      <ToastProvider>
+        <BrandingProvider>
+          <AuthProvider>
+            <BrowserRouter>
+              <Routes>
               {/* Default Redirect to Dashboard */}
               <Route path="/" element={<Navigate to="/admin" replace />} />
 
@@ -698,6 +841,7 @@ export default function App() {
           </BrowserRouter>
         </AuthProvider>
       </BrandingProvider>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }

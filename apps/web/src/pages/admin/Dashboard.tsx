@@ -45,7 +45,6 @@ import {
   Calendar,
   Building2,
   Clock,
-  Sparkles,
   AlertCircle,
   FileText,
 } from 'lucide-react';
@@ -218,9 +217,9 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-3">
-          <Badge variant="success" className="px-3 py-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1 animate-pulse" />
-            System Active
+          <Badge variant={isError ? 'outline' : 'success'} className={`px-3 py-1 ${isError ? 'text-rose-600 border-rose-200' : ''}`}>
+            <span className={`w-1.5 h-1.5 rounded-full mr-1 ${isError ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
+            {isError ? 'Connection Issue' : 'Live Data'}
           </Badge>
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 shadow-sm">
             <ShieldCheck className="w-3.5 h-3.5 text-brand-600" />
@@ -246,7 +245,7 @@ export default function Dashboard() {
       {isError && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm flex items-center gap-3">
           <AlertCircle className="w-5 h-5 shrink-0" />
-          <span>Could not load live dashboard telemetry. Please ensure the API is running on port 4000.</span>
+          <span>Could not load live dashboard telemetry. Please check your connection and try again.</span>
         </div>
       )}
 
@@ -257,7 +256,7 @@ export default function Dashboard() {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* KPI: Staff Headcount */}
-            {d.headcount !== null && (
+            {d.headcount != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -275,7 +274,7 @@ export default function Dashboard() {
             )}
 
             {/* KPI: Present Today */}
-            {d.present_today !== null && (
+            {d.present_today != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -293,7 +292,7 @@ export default function Dashboard() {
             )}
 
             {/* KPI: Pending Leave Approvals */}
-            {d.pending_leaves !== null && (
+            {d.pending_leaves != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -311,7 +310,7 @@ export default function Dashboard() {
             )}
 
             {/* KPI: Monthly Payroll */}
-            {d.payroll_net !== null && (
+            {d.payroll_net != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -331,7 +330,7 @@ export default function Dashboard() {
             )}
 
             {/* KPI: CRM Customers */}
-            {d.customers !== null && (
+            {d.customers != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -405,7 +404,7 @@ export default function Dashboard() {
             )}
 
             {/* KPI: Active Inventory Items */}
-            {d.active_items !== null && (
+            {d.active_items != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -423,7 +422,7 @@ export default function Dashboard() {
             )}
 
             {/* KPI: Invoiced Revenue */}
-            {d.revenue_month !== null && (
+            {d.revenue_month != null && (
               <Card className="hover:border-slate-300 transition-all hover:shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">

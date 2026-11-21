@@ -31,8 +31,6 @@ import {
   Plus,
   KeyRound,
   History,
-  CheckCircle2,
-  AlertCircle,
   Search,
   Check,
   SlidersHorizontal,
@@ -40,6 +38,7 @@ import {
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Badge } from '../../components/ui/Badge';
+import { useToast } from '../../components/ui/Toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Switch } from '../../components/ui/Switch';
 import {
@@ -142,12 +141,11 @@ export default function Staff({ tab }: { tab: Tab }) {
 
 function UsersTab() {
   const { can } = useAuth();
+  const toast = useToast();
   const users = useQuery({ queryKey: ['staff-users'], queryFn: () => api.get('/staff/users') });
   const roles = useQuery({ queryKey: ['staff-roles'], queryFn: () => api.get('/staff/roles') });
 
   const [search, setSearch] = useState('');
-  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
-  const [tempPw, setTempPw] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [activity, setActivity] = useState<{ who: string; rows: any[] } | null>(null);
@@ -168,29 +166,30 @@ function UsersTab() {
   }, [rows, search]);
 
   const resetPw = async (u: UserRow) => {
-    setMsg(null);
-    setTempPw('');
     try {
       const res = await api.post(`/staff/users/${u.user_id}/reset-password`, {});
-      setMsg({ text: `Password reset successfully for ${u.display_name}.` });
-      setTempPw(`${res.data.email}: ${res.data.temporaryPassword}`);
+      toast.push({
+        title: `Password reset for ${u.display_name}`,
+        description: `${res.data.email} · temporary password: ${res.data.temporaryPassword}. Share it once over a trusted channel.`,
+        variant: 'success',
+        duration: 0,
+      });
     } catch (e: any) {
-      setMsg({ text: e.message || 'Password reset failed.', error: true });
+      toast.error('Password reset failed', e.message || 'Please try again.');
     }
   };
 
   const toggleActive = async (u: UserRow) => {
     if (u.is_primary) {
-      setMsg({ text: 'The primary system administrator cannot be deactivated.', error: true });
+      toast.error('Cannot deactivate the primary administrator');
       return;
     }
-    setMsg(null);
     try {
       await api.patch(`/staff/users/${u.user_id}`, { active: u.active ? 0 : 1 });
-      setMsg({ text: `User ${u.display_name} has been ${u.active ? 'deactivated' : 'activated'}.` });
+      toast.success(`User ${u.active ? 'deactivated' : 'activated'}`, u.display_name);
       users.refetch();
     } catch (e: any) {
-      setMsg({ text: e.message || 'Status update failed.', error: true });
+      toast.error('Status update failed', e.message || 'Please try again.');
     }
   };
 
@@ -198,34 +197,13 @@ function UsersTab() {
     try {
       const res = await api.get(`/audit-logs?actor_id=${u.user_id}&limit=12`);
       setActivity({ who: u.display_name, rows: res.data || [] });
-    } catch (e: any) {
-      setMsg({ text: 'Could not load activity log.', error: true });
+    } catch {
+      toast.error('Could not load activity log');
     }
   };
 
   return (
     <div className="space-y-4">
-      {/* Alert Messages */}
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center justify-between ${
-            msg.error
-              ? 'bg-rose-50 border-rose-200 text-rose-700'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {msg.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-            <span>{msg.text}</span>
-          </div>
-          {tempPw && (
-            <span className="font-mono bg-white px-2.5 py-1 rounded border border-emerald-300 text-slate-800 font-bold select-all">
-              {tempPw}
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Action Bar & Search */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="relative max-w-sm w-full">
@@ -370,9 +348,9 @@ function UsersTab() {
             setAddOpen(false);
             setEditing(null);
             users.refetch();
-            setMsg({ text: `User ${editing ? 'updated' : 'created'} successfully.` });
+            toast.success(`User ${editing ? 'updated' : 'created'}`, 'The staff directory is up to date.');
           }}
-          onError={(m) => setMsg({ text: m, error: true })}
+          onError={(m) => toast.error('Could not save user', m)}
         />
       )}
 
@@ -530,6 +508,7 @@ function UserFormDialog({
 
 function RolesTab() {
   const { can } = useAuth();
+  const toast = useToast();
   const roles = useQuery({ queryKey: ['staff-roles'], queryFn: () => api.get('/staff/roles') });
   const perms = useQuery({ queryKey: ['permissions'], queryFn: () => api.get('/staff/permissions') });
 
@@ -538,7 +517,6 @@ function RolesTab() {
 
   const [selectedId, setSelectedId] = useState<string>('');
   const [draft, setDraft] = useState<Set<string> | null>(null);
-  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const manage = can('roles.manage');
 
@@ -583,32 +561,18 @@ function RolesTab() {
 
   const save = async () => {
     if (!selected) return;
-    setMsg(null);
     try {
       await api.put(`/staff/roles/${selected.id}/permissions`, { permissions: [...currentDraft] });
-      setMsg({ text: `Saved ${currentDraft.size} permission(s) for ${selected.name}.` });
+      toast.success('Permissions saved', `${currentDraft.size} permission(s) applied to ${selected.name}.`);
       setDraft(null);
       roles.refetch();
     } catch (e: any) {
-      setMsg({ text: e.message || 'Permission update failed.', error: true });
+      toast.error('Permission update failed', e.message || 'Please try again.');
     }
   };
 
   return (
     <div className="space-y-6">
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
-            msg.error
-              ? 'bg-rose-50 border-rose-200 text-rose-700'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-          }`}
-        >
-          {msg.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-          <span>{msg.text}</span>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Left: Role List Selection Cards */}
         <Card className="space-y-4">
@@ -739,8 +703,9 @@ function RolesTab() {
           onSaved={() => {
             setNewOpen(false);
             roles.refetch();
+            toast.success('Role created', 'Assign its permissions from the matrix.');
           }}
-          onError={(m) => setMsg({ text: m, error: true })}
+          onError={(m) => toast.error('Could not create role', m)}
         />
       )}
     </div>
@@ -820,41 +785,27 @@ function NewRoleDialog({
 
 function OrgTab({ kind }: { kind: 'departments' | 'designations' }) {
   const { can } = useAuth();
+  const toast = useToast();
   const q = useQuery({ queryKey: ['staff', kind], queryFn: () => api.get(`/staff/${kind}`) });
   const rows: OrgRow[] = q.data?.data || [];
 
-  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<OrgRow | null>(null);
   const manage = can('staff.manage');
   const noun = kind === 'departments' ? 'Department' : 'Designation';
 
   const toggleActive = async (r: OrgRow) => {
-    setMsg(null);
     try {
       await api.patch(`/staff/${kind}/${r.id}`, { active: r.active ? 0 : 1 });
-      setMsg({ text: `${noun} ${r.name} ${r.active ? 'deactivated' : 'activated'}.` });
+      toast.success(`${noun} ${r.active ? 'deactivated' : 'activated'}`, r.name);
       q.refetch();
     } catch (e: any) {
-      setMsg({ text: e.message || 'Status update failed.', error: true });
+      toast.error('Status update failed', e.message || 'Please try again.');
     }
   };
 
   return (
     <div className="space-y-4">
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
-            msg.error
-              ? 'bg-rose-50 border-rose-200 text-rose-700'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
-          }`}
-        >
-          {msg.error ? <AlertCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
-          <span>{msg.text}</span>
-        </div>
-      )}
-
       <div className="flex items-center justify-between">
         <div>
           <span className="text-xs text-slate-500">
@@ -950,9 +901,9 @@ function OrgTab({ kind }: { kind: 'departments' | 'designations' }) {
             setOpen(false);
             setEditing(null);
             q.refetch();
-            setMsg({ text: `${noun} saved successfully.` });
+            toast.success(`${noun} saved`, 'The organization structure is up to date.');
           }}
-          onError={(m) => setMsg({ text: m, error: true })}
+          onError={(m) => toast.error(`Could not save ${noun.toLowerCase()}`, m)}
         />
       )}
     </div>

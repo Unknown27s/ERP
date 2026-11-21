@@ -7,6 +7,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useToast } from '../../../components/ui/Toast';
 import {
   AlertCircle,
   Archive,
@@ -413,7 +414,7 @@ export default function SupportCases() {
   const [limit, setLimit] = useState(20);
   const [newOpen, setNewOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState('');
+  const toast = useToast();
 
   const { owners, available: ownersAvailable } = useOwners(true);
 
@@ -462,11 +463,11 @@ export default function SupportCases() {
   const archiveCase = async (supportCase: SupportCase) => {
     if (!window.confirm(`Archive case ${supportCase.case_code} (${supportCase.subject})? It is kept for audit.`)) return;
     try {
-      setActionError('');
       await api.del(`/support-cases/${supportCase.id}`);
+      toast.success('Case archived', `${supportCase.case_code} (${supportCase.subject}) is kept for audit.`);
       refresh();
     } catch (e: any) {
-      setActionError(e.message);
+      toast.error('Could not archive case', e.message);
     }
   };
 
@@ -566,12 +567,6 @@ export default function SupportCases() {
           )}
         </div>
       </div>
-
-      {actionError && (
-        <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <AlertCircle className="w-4 h-4 shrink-0" /> {actionError}
-        </div>
-      )}
 
       {casesQuery.isError && (
         <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

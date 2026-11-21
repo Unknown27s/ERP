@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Icon, ICONS } from './icons';
+import { Search } from 'lucide-react';
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
@@ -119,7 +119,7 @@ export function ModalSearch({
   return (
     <div className="modal-search">
       <div className="modal-search-input">
-        <Icon paths={ICONS.search} size={16} />
+        <Search className="w-4 h-4" />
         <input
           autoFocus={autoFocus}
           value={value}
@@ -134,7 +134,7 @@ export function ModalSearch({
         />
       </div>
       <button type="button" className="btn primary" onClick={onSearch}>
-        <Icon paths={ICONS.search} size={15} />
+        <Search className="w-4 h-4" />
         Search
       </button>
     </div>

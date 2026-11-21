@@ -11,6 +11,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { useToast } from '../../../components/ui/Toast';
 import {
   AlertCircle,
   Archive,
@@ -766,7 +767,7 @@ export default function Leads() {
   const [newOpen, setNewOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [converting, setConverting] = useState<Lead | null>(null);
-  const [actionError, setActionError] = useState('');
+  const toast = useToast();
 
   const pipeline = useQuery({
     queryKey: ['crm-pipeline'],
@@ -825,11 +826,11 @@ export default function Leads() {
   const archiveLead = async (lead: Lead) => {
     if (!window.confirm(`Archive lead ${lead.lead_code} (${lead.name})? It is hidden from the pipeline but kept for audit.`)) return;
     try {
-      setActionError('');
       await api.del(`/leads/${lead.id}`);
+      toast.success('Lead archived', `${lead.lead_code} (${lead.name}) is hidden from the pipeline but kept for audit.`);
       refresh();
     } catch (e: any) {
-      setActionError(e.message);
+      toast.error('Could not archive lead', e.message);
     }
   };
 
@@ -970,12 +971,6 @@ export default function Leads() {
           )}
         </div>
       </div>
-
-      {actionError && (
-        <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <AlertCircle className="w-4 h-4 shrink-0" /> {actionError}
-        </div>
-      )}
 
       {leadsQuery.isError && (
         <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

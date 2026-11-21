@@ -7,7 +7,7 @@
  *   - Left: Deep enterprise brand showcase (#0B0F19) with subtle radial glows,
  *     logo badge, product title, and architectural feature badges.
  *   - Right: Centered, clean form card with accessible inputs, interactive
- *     password reveal, and 1-click demo role population for instant testing.
+ *     password reveal, and a preview roster that fills a real person's login.
  * - Mobile: Stacks gracefully into a compact brand header followed by the form.
  *
  * Design Tokens:
@@ -17,16 +17,15 @@
  * ==============================================================================
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/auth';
-import { useBranding } from '../hooks/branding';
+import { useBranding, type PreviewAccount } from '../hooks/branding';
 import {
   ShieldCheck,
   Users,
   Briefcase,
   Layers,
-  CheckCircle2,
   Lock,
   Mail,
   Eye,
@@ -36,14 +35,6 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-
-/** Pre-configured demo accounts for fast evaluative testing */
-const DEMO_ACCOUNTS = [
-  { role: 'Admin', email: 'admin@marvelsoftware.local', pass: 'Admin@123', badge: 'Full access' },
-  { role: 'HR', email: 'hr@marvelsoftware.local', pass: 'Hr@12345', badge: 'People & Leave' },
-  { role: 'Finance', email: 'finance@marvelsoftware.local', pass: 'Finance@123', badge: 'Books & Payroll' },
-  { role: 'Employee', email: 'employee@marvelsoftware.local', pass: 'Employee@123', badge: 'Self-service' },
-];
 
 export default function Login() {
   const { login } = useAuth();
@@ -55,10 +46,12 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   // Runtime branding resolved from server (/api/config)
   const productName = brand.product_name || brand.company_name || 'MarvelSoftware';
   const companyName = brand.company_name || 'MarvelSoftware Inc.';
+  const previewAccounts = brand.preview?.enabled ? brand.preview.accounts : [];
 
   /* ── 1. Form Submission Handler ─────────────────────────────────────────── */
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,11 +70,17 @@ export default function Login() {
     }
   };
 
-  /* ── 2. Demo Account Helper ─────────────────────────────────────────────── */
-  const fillDemo = (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
+  /* ── 2. Preview Account Helper ──────────────────────────────────────────── */
+  // The preview cards reuse the existing staff logins and fill both fields so
+  // a reviewer can sign in in one click. The password input can still be
+  // revealed/edited before submitting.
+  const fillPreview = (account: PreviewAccount) => {
+    setEmail(account.email);
+    setPassword(account.password || '');
     setError('');
+    if (!account.password) {
+      requestAnimationFrame(() => passwordRef.current?.focus());
+    }
   };
 
   return (
@@ -159,7 +158,7 @@ export default function Login() {
         <div className="relative z-10 pt-8 mt-12 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
           <span>{companyName}</span>
           <span className="flex items-center gap-1.5 text-slate-400">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> System Online
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Secure sign-in
           </span>
         </div>
       </div>
@@ -214,6 +213,7 @@ export default function Login() {
               </div>
               <div className="relative">
                 <Input
+                  ref={passwordRef}
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -250,27 +250,31 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* 1-Click Demo Accounts Selector (Only enabled in Development mode) */}
-          {import.meta.env.DEV && (
+          {/* Preview roster: existing person logins, no separate demo mailbox */}
+          {previewAccounts.length > 0 && (
             <div className="pt-6 border-t border-slate-200">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-medium text-slate-500">Quick sign-in with demo roles (Dev only):</span>
-                <span className="text-[11px] font-semibold text-brand-600">Click to fill</span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-slate-700">Preview as a team member</span>
+                <span className="text-[11px] font-semibold text-brand-600">Fills email + password</span>
               </div>
+              <p className="text-[11px] text-slate-500 mb-3">
+                Pick a person to fill their work email and preview password, then sign in. No separate preview account is created.
+              </p>
               <div className="grid grid-cols-2 gap-2">
-                {DEMO_ACCOUNTS.map((d) => (
+                {previewAccounts.map((a) => (
                   <button
-                    key={d.role}
+                    key={a.email}
                     type="button"
-                    onClick={() => fillDemo(d.email, d.pass)}
+                    onClick={() => fillPreview(a)}
+                    title={`${a.name} — ${a.email}`}
                     className={`text-left p-2.5 rounded-lg border text-xs transition-all ${
-                      email === d.email
+                      email === a.email
                         ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500'
                         : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
                     }`}
                   >
-                    <div className="font-semibold text-slate-800">{d.role}</div>
-                    <div className="text-[10px] text-slate-500 truncate">{d.badge}</div>
+                    <div className="font-semibold text-slate-800 truncate">{a.name}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{a.role}</div>
                   </button>
                 ))}
               </div>

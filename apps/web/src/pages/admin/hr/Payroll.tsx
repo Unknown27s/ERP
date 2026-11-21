@@ -25,7 +25,6 @@ import {
   Play,
   Lock,
   CheckCircle2,
-  AlertCircle,
   FileDown,
   Calendar,
   Wallet,
@@ -37,6 +36,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Badge } from '../../../components/ui/Badge';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../../components/ui/Card';
+import { useToast } from '../../../components/ui/Toast';
 import {
   Dialog,
   DialogContent,
@@ -118,7 +118,7 @@ export default function HRPayroll() {
   const [period, setPeriod] = useState(monthNow());
   const [workingDays, setWorkingDays] = useState(String(daysInMonth(monthNow())));
   const [selectedRunId, setSelectedRunId] = useState<string>('');
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const toast = useToast();
   const [salaryForm, setSalaryForm] = useState({
     employee_id: '',
     effective_from: dayNow(),
@@ -159,7 +159,6 @@ export default function HRPayroll() {
 
   const generateRun = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     try {
       const res = await api.post('/hr/payroll/preview', {
         period,
@@ -167,16 +166,15 @@ export default function HRPayroll() {
       });
       setSelectedRunId(res.data.id);
       const skipped = res.data.skipped?.length || 0;
-      setMsg({
-        ok: true,
-        text: `Payroll run generated for ${monthName(period)}.${
+      toast.success(
+        `Payroll run generated for ${monthName(period)}.${
           skipped ? ` ${skipped} staff skipped (missing salary structure).` : ''
-        }`,
-      });
+        }`
+      );
       setShowGenerate(false);
       runs.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Payroll generation failed.' });
+      toast.error(err.message || 'Payroll generation failed.');
     }
   };
 
@@ -185,11 +183,11 @@ export default function HRPayroll() {
     if (!window.confirm(`Lock payroll for ${monthName(detail.period)}? Locked payroll cannot be regenerated.`)) return;
     try {
       await api.post(`/hr/payroll/${detail.id}/lock`, {});
-      setMsg({ ok: true, text: `Payroll for ${monthName(detail.period)} locked.` });
+      toast.success(`Payroll for ${monthName(detail.period)} locked.`);
       runs.refetch();
       runDetail.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Action failed.' });
+      toast.error(err.message || 'Action failed.');
     }
   };
 
@@ -199,11 +197,11 @@ export default function HRPayroll() {
     if (!window.confirm(`Mark ${monthName(detail.period)} payroll as paid and record ${formatInr(totalNet)} to expenses?`)) return;
     try {
       await api.post(`/hr/payroll/${detail.id}/pay`, {});
-      setMsg({ ok: true, text: `Payroll marked as paid and posted to general ledger.` });
+      toast.success('Payroll marked as paid and posted to general ledger.');
       runs.refetch();
       runDetail.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Payment mark failed.' });
+      toast.error(err.message || 'Payment mark failed.');
     }
   };
 
@@ -231,7 +229,6 @@ export default function HRPayroll() {
 
   const saveSalary = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     try {
       const payload: any = {
         employee_id: salaryForm.employee_id,
@@ -241,11 +238,11 @@ export default function HRPayroll() {
         payload[k] = Number(salaryForm[k]) || 0;
       }
       await api.post('/hr/salary', payload);
-      setMsg({ ok: true, text: 'Salary structure updated successfully.' });
+      toast.success('Salary structure updated successfully.');
       setShowSalary(false);
       salaries.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Could not save salary structure' });
+      toast.error(err.message || 'Could not save salary structure');
     }
   };
 
@@ -271,20 +268,6 @@ export default function HRPayroll() {
         </div>
       }
     >
-      {/* Alert Banner */}
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
-            msg.ok
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              : 'bg-rose-50 border-rose-200 text-rose-700'
-          }`}
-        >
-          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          <span>{msg.text}</span>
-        </div>
-      )}
-
       {/* ──────────────────────────────────────────────────────────────────
           1. RUN SELECTOR & RUN METRICS BAR
           ────────────────────────────────────────────────────────────────── */}

@@ -17,8 +17,6 @@ import {
   Upload,
   Plus,
   Clock,
-  AlertCircle,
-  CheckCircle2,
   Calendar,
   FileSpreadsheet,
 } from 'lucide-react';
@@ -27,6 +25,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
+import { useToast } from '../../../components/ui/Toast';
 import {
   Dialog,
   DialogContent,
@@ -70,6 +69,7 @@ const hhmm = (mins: number) => {
 };
 
 export default function HRAttendance() {
+  const toast = useToast();
   const [month, setMonth] = useState(monthNow());
   const [empFilter, setEmpFilter] = useState('');
   const [form, setForm] = useState({
@@ -82,7 +82,6 @@ export default function HRAttendance() {
     note: '',
   });
   const [csv, setCsv] = useState('');
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [showMark, setShowMark] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
@@ -105,7 +104,6 @@ export default function HRAttendance() {
 
   const mark = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     try {
       await api.post('/hr/attendance', {
         employee_id: form.employee_id,
@@ -116,17 +114,16 @@ export default function HRAttendance() {
         overtime_minutes: Number(form.overtime_minutes) || 0,
         note: form.note || null,
       });
-      setMsg({ ok: true, text: 'Attendance record saved successfully.' });
+      toast.success('Attendance saved', 'The daily record is up to date.');
       setShowMark(false);
       await list.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Could not save attendance' });
+      toast.error('Could not save attendance', err.message || 'Please try again.');
     }
   };
 
   const importRows = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const rowsIn = lines
       .filter((l) => !/^emp_?code/i.test(l))
@@ -144,7 +141,7 @@ export default function HRAttendance() {
       .filter((r) => r.emp_code && r.date);
 
     if (!rowsIn.length) {
-      setMsg({ ok: false, text: 'Paste CSV rows as: emp_code,date,check_in,check_out,status' });
+      toast.error('No CSV rows found', 'Paste rows as: emp_code,date,check_in,check_out,status');
       return;
     }
 
@@ -152,11 +149,15 @@ export default function HRAttendance() {
       const r = await api.post('/hr/attendance/import', { source: 'biometric', rows: rowsIn });
       const d = r.data;
       const hint = d.errors?.length ? ` First error: ${d.errors[0].error}` : '';
-      setMsg({ ok: d.failed === 0, text: `Import complete: ${d.imported} processed, ${d.failed} failed.${hint}` });
-      if (d.failed === 0) setShowImport(false);
+      if (d.failed === 0) {
+        toast.success('Import complete', `${d.imported} row(s) processed.`);
+        setShowImport(false);
+      } else {
+        toast.warning('Import finished with errors', `${d.imported} processed, ${d.failed} failed.${hint}`);
+      }
       await list.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Import failed' });
+      toast.error('Import failed', err.message || 'Please try again.');
     }
   };
 
@@ -183,20 +184,6 @@ export default function HRAttendance() {
         </div>
       }
     >
-      {/* Alert Banner */}
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
-            msg.ok
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              : 'bg-rose-50 border-rose-200 text-rose-700'
-          }`}
-        >
-          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          <span>{msg.text}</span>
-        </div>
-      )}
-
       {/* Control Bar: Month Picker & Employee Filter */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-2">

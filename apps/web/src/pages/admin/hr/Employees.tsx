@@ -19,7 +19,6 @@ import {
   Search,
   Building2,
   Briefcase,
-  AlertCircle,
   CheckCircle2,
   Calendar,
   LogOut,
@@ -31,6 +30,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
+import { useToast } from '../../../components/ui/Toast';
 import {
   Dialog,
   DialogContent,
@@ -118,11 +118,11 @@ const STATUS_FILTERS = [
 ];
 
 export default function HREmployees() {
+  const toast = useToast();
   const [status, setStatus] = useState('active');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editId, setEditId] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   // Queries for employee records and dropdown lookups
@@ -161,7 +161,6 @@ export default function HREmployees() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     const payload: any = { ...form };
     for (const k of ['department_id', 'designation_id', 'branch_id']) {
       if (!payload[k]) payload[k] = null;
@@ -170,16 +169,16 @@ export default function HREmployees() {
     try {
       if (editId) {
         await api.patch(`/hr/employees/${editId}`, payload);
-        setMsg({ ok: true, text: 'Employee profile updated successfully.' });
+        toast.success('Employee updated', `${form.full_name}'s profile was saved.`);
       } else {
         await api.post('/hr/employees', payload);
-        setMsg({ ok: true, text: 'Employee created successfully.' });
+        toast.success('Employee created', `${form.full_name} was added to the directory.`);
       }
       await refresh();
       reset();
       setShowForm(false);
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Operation failed.' });
+      toast.error('Could not save employee', err.message || 'Please try again.');
     }
   };
 
@@ -211,10 +210,10 @@ export default function HREmployees() {
     const today = new Date().toISOString().slice(0, 10);
     try {
       await api.patch(`/hr/employees/${e.id}`, { status: 'exited', exit_date: today });
-      setMsg({ ok: true, text: `${e.full_name} has been marked exited.` });
+      toast.success('Employee marked exited', e.full_name);
       refresh();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Action failed.' });
+      toast.error('Could not mark employee exited', err.message || 'Please try again.');
     }
   };
 
@@ -235,20 +234,6 @@ export default function HREmployees() {
         </Button>
       }
     >
-      {/* Alert Banner */}
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
-            msg.ok
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              : 'bg-rose-50 border-rose-200 text-rose-700'
-          }`}
-        >
-          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          <span>{msg.text}</span>
-        </div>
-      )}
-
       {/* Control Bar: Search & Status Filter Pills */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="relative max-w-sm w-full">

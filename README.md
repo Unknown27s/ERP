@@ -119,6 +119,16 @@ Seeded by `npm run seed` (change every password before production):
 
 Rename the company and product in **Company settings**. The login screen and sidebar read `GET /api/config`, so the new name appears immediately.
 
+### Preview sign-in roster
+
+The login screen lists the seeded staff accounts so a reviewer can click a card and have that person's work email **and preview password** filled in for one-click sign-in. This uses the existing person logins — no separate preview mailbox or shared demo password is created.
+
+- Off by default. Set `PREVIEW_LOGIN=1` only on an isolated demo deployment; never expose it with real staff credentials.
+- `PREVIEW_EMAILS=a@x,b@y` overrides which accounts appear; by default the roster is the seven seeded logins above.
+- `PREVIEW_PASSWORDS=a@x:pass,b@y:pass` overrides the preview passwords (defaults follow the seed credentials).
+- `GET /api/config` returns `{ name, email, role, password }` for the roster while preview is enabled. Treat that endpoint as demo-only and disable it before real staff use.
+
+
 ---
 
 ## Roles and permissions

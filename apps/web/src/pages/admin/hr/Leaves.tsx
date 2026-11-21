@@ -22,8 +22,6 @@ import {
   Check,
   X,
   Calendar,
-  AlertCircle,
-  CheckCircle2,
   Trash2,
   Clock,
   Sparkles,
@@ -34,6 +32,7 @@ import { Input } from '../../../components/ui/Input';
 import { Badge } from '../../../components/ui/Badge';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../../components/ui/Card';
 import { Switch } from '../../../components/ui/Switch';
+import { useToast } from '../../../components/ui/Toast';
 import {
   Dialog,
   DialogContent,
@@ -91,6 +90,7 @@ const STATUS_FILTERS = [
 ];
 
 export default function HRLeaves() {
+  const toast = useToast();
   const [status, setStatus] = useState('pending');
   const [year, setYear] = useState(String(yearNow()));
   const [form, setForm] = useState({
@@ -102,7 +102,6 @@ export default function HRLeaves() {
   });
   const [typeForm, setTypeForm] = useState({ name: '', annual_quota: '12', paid: true });
   const [holidayForm, setHolidayForm] = useState({ holiday_date: today(), name: '', holiday_type: 'public' });
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [showApply, setShowApply] = useState(false);
   const [showType, setShowType] = useState(false);
   const [showHoliday, setShowHoliday] = useState(false);
@@ -127,27 +126,25 @@ export default function HRLeaves() {
 
   const apply = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg(null);
     try {
       await api.post('/hr/leaves', { ...form, days: reqDays });
-      setMsg({ ok: true, text: 'Leave request submitted successfully (pending review).' });
+      toast.success('Leave request submitted', 'It is now pending review.');
       setForm({ ...form, reason: '' });
       setShowApply(false);
       refreshAll();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Submission failed.' });
+      toast.error('Could not submit leave request', err.message || 'Please try again.');
     }
   };
 
   const decide = async (l: Leave, next: 'approved' | 'rejected') => {
     const note = next === 'rejected' ? window.prompt('Reason for rejection (optional)') || '' : '';
-    setMsg(null);
     try {
       await api.post(`/hr/leaves/${l.id}/decide`, { status: next, note });
-      setMsg({ ok: true, text: `Leave request ${next}.` });
+      toast.success(`Leave request ${next}`, 'Leave balances have been updated.');
       refreshAll();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Action failed.' });
+      toast.error('Could not update leave request', err.message || 'Please try again.');
     }
   };
 
@@ -160,12 +157,12 @@ export default function HRLeaves() {
         annual_quota: Number(typeForm.annual_quota) || 0,
         paid: typeForm.paid ? 1 : 0,
       });
-      setMsg({ ok: true, text: 'Leave policy type registered.' });
+      toast.success('Leave policy added', typeForm.name.trim());
       setTypeForm({ name: '', annual_quota: '12', paid: true });
       setShowType(false);
       types.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Could not add leave type.' });
+      toast.error('Could not add leave type', err.message || 'Please try again.');
     }
   };
 
@@ -174,12 +171,12 @@ export default function HRLeaves() {
     if (!holidayForm.name.trim()) return;
     try {
       await api.post('/hr/holidays', holidayForm);
-      setMsg({ ok: true, text: 'Company holiday added to calendar.' });
+      toast.success('Holiday added', holidayForm.name.trim());
       setHolidayForm({ ...holidayForm, name: '' });
       setShowHoliday(false);
       holidays.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Could not add holiday.' });
+      toast.error('Could not add holiday', err.message || 'Please try again.');
     }
   };
 
@@ -187,10 +184,10 @@ export default function HRLeaves() {
     if (!window.confirm(`Delete holiday ${h.name}?`)) return;
     try {
       await api.del(`/hr/holidays/${h.id}`);
-      setMsg({ ok: true, text: 'Holiday removed.' });
+      toast.success('Holiday removed', h.name);
       holidays.refetch();
     } catch (err: any) {
-      setMsg({ ok: false, text: err.message || 'Could not delete holiday.' });
+      toast.error('Could not delete holiday', err.message || 'Please try again.');
     }
   };
 
@@ -211,20 +208,6 @@ export default function HRLeaves() {
         </Button>
       }
     >
-      {/* Alert Banner */}
-      {msg && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
-            msg.ok
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-              : 'bg-rose-50 border-rose-200 text-rose-700'
-          }`}
-        >
-          {msg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          <span>{msg.text}</span>
-        </div>
-      )}
-
       {/* ──────────────────────────────────────────────────────────────────
           1. LEAVE REQUESTS APPROVAL SECTION
           ────────────────────────────────────────────────────────────────── */}

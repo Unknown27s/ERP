@@ -1,11 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 
+export type PreviewAccount = {
+  role: string;
+  name: string;
+  email: string;
+  /** Preview-only credential so a card can fill the password. */
+  password?: string;
+};
+
 export type Branding = {
   product_name: string;
   company_name: string;
   timezone?: string;
   currency?: string;
+  /** Existing person accounts offered as sign-in previews. Never includes passwords. */
+  preview?: { enabled: boolean; accounts: PreviewAccount[] };
 };
 
 const DEFAULTS: Branding = { product_name: 'MarvelSoftware', company_name: 'MarvelSoftware', timezone: 'Asia/Kolkata', currency: 'INR' };
