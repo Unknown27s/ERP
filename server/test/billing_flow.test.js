@@ -87,6 +87,70 @@ after(() => {
   if (srv) srv.close();
 });
 
+async function createItem(opening_quantity = 1) {
+  const item = await req('POST', '/products', {
+    name: 'Test supplies', sku: uid('SKU'), selling_price_inr: 100,
+    acquisition_cost_inr: 60, tax_rate_pct: 5, opening_quantity,
+  });
+  assert.equal(item.status, 201, JSON.stringify(item.data));
+  return item.data.data;
+}
+
+test('generic input validation rejects malformed lines, booleans and blank money', async () => {
+  const item = await createItem();
+  for (const lines of [[null], [{}], [{ product_id: item.id, quantity: true }], [{ product_id: item.id, quantity: 0 }], [{ product_id: item.id, quantity: 1.5 }]]) {
+    assert.equal((await req('POST', '/sales/draft', { lines })).status, 400);
+  }
+  assert.equal((await req('POST', '/purchases', { items: [null] })).status, 400);
+  assert.equal((await req('POST', '/sales/missing/finalize', { payments: [null] })).status, 400);
+  assert.equal((await req('PATCH', `/products/${item.id}`, { selling_price_inr: ' ' })).status, 400);
+});
+
+test('concurrent reservation, finalization and refund each change stock exactly once', async () => {
+  const item = await createItem();
+  const attempts = await Promise.all([1, 2].map(() => req('POST', '/sales/draft', { lines: [{ product_id: item.id, quantity: 1 }] })));
+  assert.deepEqual(attempts.map((r) => r.status).sort(), [201, 409]);
+  const sale = attempts.find((r) => r.status === 201).data.data;
+  const payments = await Promise.all([1, 2].map(() => req('POST', `/sales/${sale.id}/finalize`, { payments: [{ method: 'cash', amount_inr: sale.total_inr }] })));
+  assert.deepEqual(payments.map((r) => r.status).sort(), [200, 409]);
+  assert.deepEqual(await get('SELECT stock_on_hand, stock_reserved FROM products WHERE id = ?', item.id), { stock_on_hand: 0, stock_reserved: 0 });
+  const refunds = await Promise.all([1, 2].map(() => req('POST', `/sales/${sale.id}/void`, { reason: 'Test refund' })));
+  assert.deepEqual(refunds.map((r) => r.status).sort(), [200, 409]);
+  assert.deepEqual(await get('SELECT stock_on_hand, stock_reserved FROM products WHERE id = ?', item.id), { stock_on_hand: 1, stock_reserved: 0 });
+  assert.equal((await get('SELECT COUNT(*) n FROM payments WHERE sale_id = ?', sale.id)).n, 1);
+  assert.equal((await get('SELECT COUNT(*) n FROM returns_refunds WHERE sale_id = ?', sale.id)).n, 1);
+});
+
+test('cancelling a draft releases its reservation once', async () => {
+  const item = await createItem(2);
+  const draft = await req('POST', '/sales/draft', { lines: [{ product_id: item.id, quantity: 2 }] });
+  assert.equal(draft.status, 201);
+  const results = await Promise.all([1, 2].map(() => req('POST', `/sales/${draft.data.data.id}/cancel`, {})));
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+  assert.deepEqual(await get('SELECT stock_on_hand, stock_reserved FROM products WHERE id = ?', item.id), { stock_on_hand: 2, stock_reserved: 0 });
+});
+
+test('purchase payment cannot post duplicate supplier expenses', async () => {
+  const item = await createItem(0);
+  const receipt = await req('POST', '/purchases', { items: [{ product_id: item.id, quantity: 2, unit_cost_inr: 60 }] });
+  assert.equal(receipt.status, 201);
+  const purchase = receipt.data.data;
+  const results = await Promise.all([1, 2].map(() => req('POST', `/purchases/${purchase.id}/pay`, {})));
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+  const expenses = await get("SELECT COUNT(*) n, SUM(amount_inr) total FROM expenses WHERE shop_id = ? AND category = 'supplier_payment' AND note LIKE ?", shopId, `Purchase ${purchase.id} %`);
+  assert.equal(expenses.n, 1);
+  assert.equal(expenses.total, 120);
+});
+
+test('historical invoices are readable without generic price conversion', async () => {
+  const id = uid('sal');
+  await run("INSERT INTO sales (id, shop_id, invoice_no, sold_at, subtotal_inr, total_inr, status, created_by) VALUES (?,?,?,now(),1234,1234,'finalized',?)", id, shopId, uid('OLD'), adminId);
+  const invoice = await req('GET', `/sales/${id}`);
+  assert.equal(invoice.status, 200);
+  assert.equal(invoice.data.data.pricing_model, 'legacy');
+  assert.equal(invoice.data.data.total_inr, 1234);
+});
+
 test('flow: phone search returns 0 matches -> not found -> register customer with name, phno, email, birthday, anniversary', async () => {
   const testPhone = `98765${Date.now().toString().slice(-5)}`;
 
@@ -122,7 +186,7 @@ test('flow: phone search returns 0 matches -> not found -> register customer wit
   assert.ok(Array.isArray(search2.data.data[0].purchases));
 });
 
-test('flow: barcode estimate -> draft -> finalize with edited final price override', async () => {
+test('flow: explicit selling price -> discounted draft -> exact payment -> immutable invoice', async () => {
   const testPhone = `99887${Date.now().toString().slice(-5)}`;
 
   // Create customer
@@ -138,22 +202,31 @@ test('flow: barcode estimate -> draft -> finalize with edited final price overri
   assert.equal(custRes.status, 201);
   const custId = custRes.data.data.id;
 
-  // Pricing estimate for product
+  // Legacy estimation remains available, but does not determine new sale prices.
   const est = await req('POST', '/pricing/estimate', { product_id: prodId });
   assert.equal(est.status, 200);
   assert.ok(est.data.data.line_total_inr > 0);
-  const originalLineTotal = est.data.data.line_total_inr;
+  const priced = await req('PATCH', `/products/${prodId}`, { selling_price_inr: 80000, tax_rate_pct: 0 });
+  assert.equal(priced.status, 200);
+  const intake = await req('POST', '/purchases', { items: [{ product_id: prodId, quantity: 1, unit_cost_inr: 70000 }] });
+  assert.equal(intake.status, 201);
 
   // Create Draft
   const draft = await req('POST', '/sales/draft', {
     customer_id: custId,
-    lines: [{ product_id: prodId }],
+    lines: [{ product_id: prodId, quantity: 1, discount_inr: 5000 }],
   });
   assert.equal(draft.status, 201);
   const saleId = draft.data.data.id;
 
-  // Cashier edits final price directly (e.g. rounds down or negotiates custom total)
+  // The agreed price is frozen in the draft. Changing the catalogue cannot alter it.
   const editedFinalPrice = 75000;
+  assert.equal(draft.data.data.total_inr, editedFinalPrice);
+  await req('PATCH', `/products/${prodId}`, { selling_price_inr: 90000 });
+  const mismatch = await req('POST', `/sales/${saleId}/finalize`, {
+    payments: [{ method: 'upi', amount_inr: editedFinalPrice - 1 }],
+  });
+  assert.equal(mismatch.status, 400);
   const finalize = await req('POST', `/sales/${saleId}/finalize`, {
     lines: [{ product_id: prodId }],
     custom_final_price_inr: editedFinalPrice,
@@ -183,7 +256,7 @@ test('flow: barcode estimate -> draft -> finalize with edited final price overri
   assert.equal(custCheck.data.data.purchases[0].id, saleId);
 });
 
-test('flow: manual jewellery piece entry -> draft -> finalize with custom price and verify in sales history', async () => {
+test('flow: create generic item -> receive stock -> draft -> finalize -> sales history', async () => {
   const testPhone = `91234${Date.now().toString().slice(-5)}`;
 
   // 1. Register customer
@@ -200,33 +273,26 @@ test('flow: manual jewellery piece entry -> draft -> finalize with custom price 
   assert.equal(custRes.status, 201);
   const custId = custRes.data.data.id;
 
-  // 2. Draft sale with manual item entry
+  // 2. Create a priced item and receive its quantity before selling it.
   const manualSku = `MAN-${Date.now().toString().slice(-4)}`;
+  const item = await req('POST', '/products', {
+    name: 'Workshop supplies', sku: manualSku, selling_price_inr: 1000,
+    acquisition_cost_inr: 700, tax_rate_pct: 5, opening_quantity: 0,
+  });
+  assert.equal(item.status, 201, JSON.stringify(item.data));
+  const intake = await req('POST', '/purchases', {
+    items: [{ product_id: item.data.data.id, quantity: 3, unit_cost_inr: 700 }],
+  });
+  assert.equal(intake.status, 201, JSON.stringify(intake.data));
   const draft = await req('POST', '/sales/draft', {
     customer_id: custId,
-    lines: [
-      {
-        sku: manualSku,
-        manual_item: {
-          name: 'Handcrafted Antique Kada',
-          sku: manualSku,
-          purity: '22K',
-          gross_weight_g: 25.5,
-          net_gold_weight_g: 25.0,
-          making_charge_type: 'percentage',
-          making_charge_value: 12,
-          stone_value_inr: 500,
-          wastage_charge_inr: 0,
-          other_charges_inr: 0,
-        },
-      },
-    ],
+    lines: [{ product_id: item.data.data.id, quantity: 2 }],
   });
   assert.equal(draft.status, 201);
   const saleId = draft.data.data.id;
 
   // 3. Finalize with custom agreed price
-  const agreedPrice = 210000;
+  const agreedPrice = 2100;
   const finalize = await req('POST', `/sales/${saleId}/finalize`, {
     custom_final_price_inr: agreedPrice,
     payments: [{ method: 'card', amount_inr: agreedPrice }],
@@ -242,5 +308,6 @@ test('flow: manual jewellery piece entry -> draft -> finalize with custom price 
   assert.equal(history.data.data[0].id, saleId);
   assert.equal(history.data.data[0].customer_name, 'Suresh Patel');
   assert.equal(history.data.data[0].customer_phone, testPhone);
+  const stock = await get('SELECT stock_on_hand, stock_reserved FROM products WHERE id = ?', item.data.data.id);
+  assert.deepEqual(stock, { stock_on_hand: 1, stock_reserved: 0 });
 });
-

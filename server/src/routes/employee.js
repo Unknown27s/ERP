@@ -113,6 +113,7 @@ router.patch('/me', async (req, res) => {
   const args = [];
 
   if (b.photo_url !== undefined) {
+    if (b.photo_url && (typeof b.photo_url !== 'string' || b.photo_url.length > 1450000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(b.photo_url))) return bad(res, 'Use a JPEG, PNG or WebP photo smaller than 1MB');
     updates.push('photo_url = ?');
     args.push(b.photo_url || null);
     // Also keep profiles.avatar_url in sync
@@ -153,9 +154,9 @@ router.get('/clock', async (req, res) => {
   const todayDate = today();
   const activeSession = await get(
     `SELECT * FROM employee_work_sessions
-     WHERE employee_id = ? AND work_date = ? AND clock_out IS NULL
+     WHERE employee_id = ? AND clock_out IS NULL
      ORDER BY clock_in DESC LIMIT 1`,
-    emp.id, todayDate
+    emp.id
   );
 
   const todaySessions = await all(
@@ -198,8 +199,8 @@ router.post('/clock', async (req, res) => {
     // Check if already clocked in
     const active = await get(
       `SELECT * FROM employee_work_sessions
-       WHERE employee_id = ? AND work_date = ? AND clock_out IS NULL`,
-      emp.id, todayDate
+       WHERE employee_id = ? AND clock_out IS NULL`,
+      emp.id
     );
     if (active) return res.status(409).json({ error: 'conflict', message: 'Already clocked in' });
 
@@ -226,9 +227,9 @@ router.post('/clock', async (req, res) => {
   // action === 'out'
   const active = await get(
     `SELECT * FROM employee_work_sessions
-     WHERE employee_id = ? AND work_date = ? AND clock_out IS NULL
+     WHERE employee_id = ? AND clock_out IS NULL
      ORDER BY clock_in DESC LIMIT 1`,
-    emp.id, todayDate
+    emp.id
   );
   if (!active) return res.status(400).json({ error: 'bad_request', message: 'No active clock-in session found' });
 
@@ -244,12 +245,12 @@ router.post('/clock', async (req, res) => {
   const [sum] = await all(
     `SELECT COALESCE(SUM(total_minutes), 0) AS mins
      FROM employee_work_sessions WHERE employee_id = ? AND work_date = ?`,
-    emp.id, todayDate
+    emp.id, active.work_date
   );
   await run(
     `UPDATE attendance SET worked_minutes = ?, updated_at = now()
      WHERE employee_id = ? AND work_date = ?`,
-    sum?.mins || diffMins, emp.id, todayDate
+    sum?.mins || diffMins, emp.id, active.work_date
   );
 
   await audit(req.user.user_id, 'employee.clock.out', 'work_session', active.id, `${todayDate} Clock Out (${diffMins}m)`);
@@ -511,7 +512,8 @@ router.delete('/leaves/:id', async (req, res) => {
   if (!request) return res.status(404).json({ error: 'not_found' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'conflict', message: `Cannot cancel an already ${request.status} request` });
 
-  await run(`UPDATE leave_requests SET status = 'cancelled' WHERE id = ?`, request.id);
+  const cancelled = await run(`UPDATE leave_requests SET status = 'cancelled' WHERE id = ? AND status = 'pending'`, request.id);
+  if (!cancelled.changes) return res.status(409).json({ error: 'conflict', message: 'Request is no longer pending' });
   await audit(req.user.user_id, 'employee.leave.cancel', 'leave_request', request.id, 'Self-cancelled leave request');
   res.json({ data: { cancelled: true } });
 });

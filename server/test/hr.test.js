@@ -217,14 +217,19 @@ test('payroll: LOP deduction, lock, pay and expense posting', async () => {
 
   const before = await api('GET', `/hr/payroll/${payrollId}`, adminTok);
   assert.equal(before.body.data.status, 'locked');
-  const pay = await api('POST', `/hr/payroll/${payrollId}/pay`, adminTok, {});
-  assert.equal(pay.status, 200, JSON.stringify(pay.body));
+  const payments = await Promise.all([
+    api('POST', `/hr/payroll/${payrollId}/pay`, adminTok, {}),
+    api('POST', `/hr/payroll/${payrollId}/pay`, adminTok, {}),
+  ]);
+  assert.deepEqual(payments.map((r) => r.status).sort(), [200, 409], 'concurrent pay posts only once');
   const afterPay = await api('GET', `/hr/payroll/${payrollId}`, adminTok);
   assert.equal(afterPay.body.data.status, 'paid');
 
   const exp = await get(`SELECT * FROM expenses WHERE shop_id=? AND category='salary' AND note=?`, shopId, `Payroll ${period}`);
   assert.ok(exp, 'salary expense is posted once when payroll is marked paid');
   assert.equal(Number(exp.amount_inr), Number(slip.net_inr));
+  const expenseCount = await get("SELECT COUNT(*) n FROM expenses WHERE shop_id = ? AND category = 'salary' AND note = ?", shopId, `Payroll ${period}`);
+  assert.equal(expenseCount.n, 1);
 
   const slipRes = await api('GET', `/hr/payslips/${slip.id}`, adminTok);
   assert.equal(slipRes.status, 200);

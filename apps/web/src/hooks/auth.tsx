@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, setToken, token } from '../lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 
 export type User = {
   user_id: string;
@@ -17,13 +18,13 @@ type CtxValue = {
   user: User | null;
   loading: boolean;
   login: (e: string, p: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   can: (permission: string) => boolean;
   refreshUser: () => Promise<void>;
 };
 
 const Ctx = createContext<CtxValue>({
-  user: null, loading: true, login: async () => {}, logout: () => {}, can: () => false, refreshUser: async () => {},
+  user: null, loading: true, login: async () => {}, logout: async () => {}, can: () => false, refreshUser: async () => {},
 });
 
 export const useAuth = () => useContext(Ctx);
@@ -36,6 +37,7 @@ export function can(user: User | null, permission: string) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -55,17 +57,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
+    await queryClient.cancelQueries();
+    queryClient.clear();
     const r = await api.login(email, password);
     setToken(r.token);
     setUser(r.user);
   };
 
-  const logout = () => {
-    setToken(''); setUser(null);
+  const logout = async () => {
+    setLoading(true);
+    try { await api.post('/auth/logout'); }
+    finally {
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      setToken(''); setUser(null); setLoading(false);
+    }
     try {
       Object.keys(sessionStorage).filter((k) => k.startsWith('campaign_reminder_closed:')).forEach((k) => sessionStorage.removeItem(k));
     } catch { /* ignore */ }
   };
+
+  useEffect(() => {
+    const expired = () => {
+      setToken(''); setUser(null);
+      void queryClient.cancelQueries().then(() => queryClient.clear());
+    };
+    window.addEventListener('erp:unauthorized', expired);
+    return () => window.removeEventListener('erp:unauthorized', expired);
+  }, [queryClient]);
 
   const canFn = (permission: string) => can(user, permission);
 

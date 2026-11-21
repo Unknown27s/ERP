@@ -4,6 +4,7 @@ const { auth, requireAnyPermission, requirePermission, audit } = require('../mid
 const { currentRate, rateFreshness } = require('../services/rates');
 const { priceLine } = require('../services/pricing');
 const { validateOffer } = require('./ops');
+const { hasPermission } = require('../services/rbac');
 
 const router = express.Router();
 router.use(auth);
@@ -201,7 +202,11 @@ router.get('/sales/:id', requireAnyPermission('finance.view', 'crm.view'), async
     LEFT JOIN shops sh ON sh.id=s.shop_id
     WHERE s.id=? AND s.shop_id=?`, req.params.id, req.user.shop_id);
   if (!sale) return res.status(404).json({ error: 'not_found' });
-  res.json({ data: { ...sale, lines: await all('SELECT * FROM sale_items WHERE sale_id=?', sale.id), payments: await all('SELECT * FROM payments WHERE sale_id=?', sale.id) } });
+  const lines = await all('SELECT * FROM sale_items WHERE sale_id=?', sale.id);
+  if (!hasPermission(req.user.permissions, 'finance.view') && !hasPermission(req.user.permissions, 'inventory.manage')) {
+    for (const line of lines) delete line.unit_cost_inr;
+  }
+  res.json({ data: { ...sale, lines, payments: await all('SELECT * FROM payments WHERE sale_id=?', sale.id) } });
 });
 
 // Void / return / refund — auditable, never rewrites history (§4)

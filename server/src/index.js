@@ -176,6 +176,7 @@ app.use('/api/staff', require('./routes/staff'));
 app.use('/api/hr', require('./routes/hr'));
 app.use('/api/employee', require('./routes/employee'));
 app.use('/api', require('./routes/dashboard'));
+app.use('/api', require('./routes/generic-commerce'));
 app.use('/api', require('./routes/catalog'));
 app.use('/api', require('./routes/ops'));
 app.use('/api', require('./routes/sales'));
@@ -187,6 +188,9 @@ app.get('/api/version', (req, res) => res.json({ ok: true }));
 // Consistent error shape (§9)
 app.use((err, req, res, next) => {
   console.error(err);
+  if (err.code === '23505') return res.status(409).json({ error: 'conflict', message: 'A record with these unique details already exists' });
+  if (['23503', '23514', '22007', '22008', '22P02'].includes(err.code)) return res.status(400).json({ error: 'bad_request', message: 'Invalid field value or related record' });
+  if ([400, 403, 404, 409, 422].includes(err.status)) return res.status(err.status).json({ error: 'request_failed', message: err.message });
   res.status(500).json({ error: 'internal', message: 'Unexpected error', correlationId: Date.now().toString(36) });
 });
 

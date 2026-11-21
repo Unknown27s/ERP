@@ -14,6 +14,7 @@ import React, { type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../hooks/auth';
 import { UserCheck, CalendarClock, CalendarRange, Banknote } from 'lucide-react';
 import { Card, CardContent } from '../../../components/ui/Card';
 
@@ -45,10 +46,12 @@ export const KPI_TINTS = {
 
 /** Shared, cached HR overview telemetry */
 export function useHrOverview(): HrOverview | undefined {
+  const { can } = useAuth();
   const q = useQuery({
     queryKey: ['hr-overview'],
     queryFn: () => api.get('/hr/overview'),
     staleTime: 30_000,
+    enabled: can('hr.view'),
   });
   return q.data?.data;
 }
@@ -79,6 +82,7 @@ export default function HrShell({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const { can } = useAuth();
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
       {/* ── 1. Header Zone ─────────────────────────────────────────────────── */}
@@ -124,7 +128,7 @@ export default function HrShell({
 
       {/* ── 3. Pill Tab Navigation ──────────────────────────────────────────── */}
       <nav className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-xl w-fit" aria-label="HR sections">
-        {HR_TABS.map((t) => {
+        {HR_TABS.filter((t) => t.to.endsWith('payroll') ? can('payroll.view') : t.to.endsWith('leaves') ? can('hr.view') || can('leave.approve') || can('leave.manage') : can('hr.view')).map((t) => {
           const IconComp = t.icon;
           return (
             <NavLink

@@ -14,7 +14,7 @@
  */
 const express = require('express');
 const { get, all, run, withTransaction, uid } = require('../db');
-const { auth, requirePermission, audit } = require('../middleware/auth');
+const { auth, requirePermission, requireAnyPermission, audit } = require('../middleware/auth');
 const { hasPermission } = require('../services/rbac');
 const { today } = require('../services/date');
 
@@ -550,7 +550,7 @@ async function ensureLeaveBalances(shopId, year, employeeId = null) {
   }
 }
 
-router.get('/leave-balances', requirePermission('leave.view'), async (req, res) => {
+router.get('/leave-balances', requireAnyPermission('hr.view', 'leave.approve', 'leave.manage'), async (req, res) => {
   const year = Number(req.query.year || today().slice(0, 4));
   if (!Number.isInteger(year) || year < 2000 || year > 2100) return bad(res, 'invalid year');
   const employeeId = req.query.employee_id || null;
@@ -570,7 +570,7 @@ router.get('/leave-balances', requirePermission('leave.view'), async (req, res) 
 });
 
 // ------------------------------------------------------------ leave requests
-router.get('/leaves', requirePermission('leave.view'), async (req, res) => {
+router.get('/leaves', requireAnyPermission('hr.view', 'leave.approve', 'leave.manage'), async (req, res) => {
   const { status, employee_id, month } = req.query;
   const conds = ['l.shop_id = ?'];
   const args = [req.user.shop_id];
@@ -596,7 +596,7 @@ router.get('/leaves', requirePermission('leave.view'), async (req, res) => {
   res.json({ data: rows });
 });
 
-router.post('/leaves', requirePermission('leave.view'), async (req, res) => {
+router.post('/leaves', requireAnyPermission('hr.manage', 'leave.manage'), async (req, res) => {
   const { employee_id, leave_type_id, from_date, to_date, reason } = req.body || {};
   if (!employee_id || !leave_type_id) return bad(res, 'employee_id and leave_type_id required');
   if (!isDate(from_date) || !isDate(to_date)) return bad(res, 'from_date and to_date must be YYYY-MM-DD');
@@ -645,17 +645,23 @@ router.post('/leaves/:id/decide', requirePermission('leave.approve'), async (req
   if (request.status !== 'pending') return res.status(409).json({ error: 'conflict', message: `Request already ${request.status}` });
 
   if (status === 'rejected') {
-    await run(`UPDATE leave_requests SET status = 'rejected', decided_by = ?, decided_at = now(), decision_note = ? WHERE id = ?`,
+    const rejected = await run(`UPDATE leave_requests SET status = 'rejected', decided_by = ?, decided_at = now(), decision_note = ? WHERE id = ? AND status = 'pending'`,
       req.user.user_id, note || null, request.id);
+    if (!rejected.changes) return res.status(409).json({ error: 'conflict', message: 'Request is no longer pending' });
     await audit(req.user.user_id, 'hr.leave.reject', 'leave_request', request.id, `${request.from_date}→${request.to_date}`);
     return res.json({ data: await get('SELECT * FROM leave_requests WHERE id = ?', request.id) });
   }
 
   const year = Number(request.from_date.slice(0, 4));
   const result = await withTransaction(async (tx) => {
-    const current = await tx.get('SELECT status FROM leave_requests WHERE id = ?', request.id);
+    const current = await tx.get('SELECT status FROM leave_requests WHERE id = ? FOR UPDATE', request.id);
     if (!current || current.status !== 'pending') {
       throw Object.assign(new Error('Request is no longer pending'), { status: 409 });
+    }
+    await tx.get('SELECT pg_advisory_xact_lock(hashtext(?))', `leave:${request.employee_id}:${year}`);
+    const balance = await tx.get('SELECT * FROM leave_balances WHERE employee_id = ? AND leave_type_id = ? AND year = ? FOR UPDATE', request.employee_id, request.leave_type_id, year);
+    if (request.paid && (!balance || num(balance.entitled) - num(balance.used) < num(request.days))) {
+      throw Object.assign(new Error('Insufficient leave balance at approval time'), { status: 409 });
     }
     await tx.run(`UPDATE leave_requests SET status = 'approved', decided_by = ?, decided_at = now(), decision_note = ? WHERE id = ?`,
       req.user.user_id, note || null, request.id);
@@ -682,12 +688,13 @@ router.post('/leaves/:id/decide', requirePermission('leave.approve'), async (req
   res.json({ data: result });
 });
 
-router.post('/leaves/:id/cancel', requirePermission('leave.view'), async (req, res) => {
+router.post('/leaves/:id/cancel', requireAnyPermission('hr.manage', 'leave.manage'), async (req, res) => {
   const request = await get('SELECT * FROM leave_requests WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
   if (!request) return res.status(404).json({ error: 'not_found' });
   if (request.status !== 'pending') return res.status(409).json({ error: 'conflict', message: `Request already ${request.status}` });
-  await run(`UPDATE leave_requests SET status = 'cancelled', decided_by = ?, decided_at = now() WHERE id = ?`,
+  const cancelled = await run(`UPDATE leave_requests SET status = 'cancelled', decided_by = ?, decided_at = now() WHERE id = ? AND status = 'pending'`,
     req.user.user_id, request.id);
+  if (!cancelled.changes) return res.status(409).json({ error: 'conflict', message: 'Request is no longer pending' });
   await audit(req.user.user_id, 'hr.leave.cancel', 'leave_request', request.id, `${request.from_date}→${request.to_date}`);
   res.json({ data: await get('SELECT * FROM leave_requests WHERE id = ?', request.id) });
 });
@@ -737,6 +744,9 @@ router.post('/salary', requirePermission('payroll.manage'), async (req, res) => 
 });
 
 // ----------------------------------------------------------------- payroll
+router.get('/payroll-employees', requirePermission('payroll.view'), async (req, res) => {
+  res.json({ data: await all('SELECT id, emp_code, full_name, status FROM employees WHERE shop_id = ? ORDER BY full_name', req.user.shop_id) });
+});
 router.get('/payroll', requirePermission('payroll.view'), async (req, res) => {
   const rows = await all(
     `SELECT pr.*, COUNT(ps.id)::int AS employee_count,
@@ -773,9 +783,12 @@ router.post('/payroll/preview', requirePermission('payroll.manage'), async (req,
   const workingDays = b.working_days !== undefined ? num(b.working_days) : daysInMonth(period);
   if (workingDays <= 0) return bad(res, 'working_days must be greater than 0');
 
-  let payroll = await get('SELECT * FROM payroll_runs WHERE shop_id = ? AND period = ?', req.user.shop_id, period);
+  const result = await withTransaction(async (tx) => {
+  await tx.get('SELECT pg_advisory_xact_lock(hashtext(?))', `payroll:${req.user.shop_id}`);
+  const { get, all, run } = tx;
+  let payroll = await get('SELECT * FROM payroll_runs WHERE shop_id = ? AND period = ? FOR UPDATE', req.user.shop_id, period);
   if (payroll && payroll.status !== 'draft') {
-    return res.status(409).json({ error: 'conflict', message: `Payroll for ${period} is ${payroll.status} and cannot be regenerated` });
+    throw Object.assign(new Error(`Payroll for ${period} is ${payroll.status} and cannot be regenerated`), { status: 409 });
   }
   if (!payroll) {
     const id = uid('pay');
@@ -789,9 +802,9 @@ router.post('/payroll/preview', requirePermission('payroll.manage'), async (req,
 
   const employees = await all(
     `SELECT e.* FROM employees e
-     WHERE e.shop_id = ? AND (e.status IN ('active','notice') OR
+      WHERE e.shop_id = ? AND e.joining_date <= ? AND (e.status IN ('active','notice') OR
        (e.exit_date IS NOT NULL AND e.exit_date >= ? AND e.exit_date <= ?))
-     ORDER BY e.full_name`, req.user.shop_id, from, to);
+      ORDER BY e.full_name`, req.user.shop_id, to, from, to);
 
   const skipped = [];
   for (const emp of employees) {
@@ -853,42 +866,48 @@ router.post('/payroll/preview', requirePermission('payroll.manage'), async (req,
       lopDeduction, totalDeductions, net);
   }
 
-  await audit(req.user.user_id, 'hr.payroll.preview', 'payroll_run', payroll.id, `${period}: ${employees.length - skipped.length} payslip(s)`);
   const slips = await all(
     `SELECT ps.*, e.full_name, e.emp_code FROM payslips ps JOIN employees e ON e.id = ps.employee_id
      WHERE ps.payroll_run_id = ? ORDER BY e.full_name`, payroll.id);
-  res.json({ data: { ...payroll, working_days: workingDays, payslips: slips, skipped } });
+  return { ...payroll, working_days: workingDays, payslips: slips, skipped };
+  });
+  await audit(req.user.user_id, 'hr.payroll.preview', 'payroll_run', result.id, `${period}: ${result.payslips.length} payslip(s)`);
+  res.json({ data: result });
 });
 
 router.post('/payroll/:id/lock', requirePermission('payroll.manage'), async (req, res) => {
-  const payroll = await get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
-  if (!payroll) return res.status(404).json({ error: 'not_found' });
-  if (payroll.status !== 'draft') return res.status(409).json({ error: 'conflict', message: `Payroll is already ${payroll.status}` });
-  const [count] = await all('SELECT COUNT(*)::int AS c FROM payslips WHERE payroll_run_id = ?', payroll.id);
-  if (!count?.c) return res.status(409).json({ error: 'conflict', message: 'No payslips to lock — preview the payroll first' });
-  await run(`UPDATE payroll_runs SET status = 'locked', locked_at = now() WHERE id = ?`, payroll.id);
+  const payroll = await withTransaction(async (tx) => {
+    await tx.get('SELECT pg_advisory_xact_lock(hashtext(?))', `payroll:${req.user.shop_id}`);
+    const row = await tx.get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ? FOR UPDATE', req.params.id, req.user.shop_id);
+    if (!row) throw Object.assign(new Error('Payroll not found'), { status: 404 });
+    if (row.status !== 'draft') throw Object.assign(new Error(`Payroll is already ${row.status}`), { status: 409 });
+    const count = await tx.get('SELECT COUNT(*)::int AS c FROM payslips WHERE payroll_run_id = ?', row.id);
+    if (!count.c) throw Object.assign(new Error('No payslips to lock'), { status: 409 });
+    await tx.run(`UPDATE payroll_runs SET status = 'locked', locked_at = now() WHERE id = ?`, row.id);
+    return tx.get('SELECT * FROM payroll_runs WHERE id = ?', row.id);
+  });
   await audit(req.user.user_id, 'hr.payroll.lock', 'payroll_run', payroll.id, payroll.period);
-  res.json({ data: await get('SELECT * FROM payroll_runs WHERE id = ?', payroll.id) });
+  res.json({ data: payroll });
 });
 
 router.post('/payroll/:id/pay', requirePermission('payroll.manage'), async (req, res) => {
-  const payroll = await get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ?', req.params.id, req.user.shop_id);
-  if (!payroll) return res.status(404).json({ error: 'not_found' });
-  if (payroll.status === 'paid') return res.status(409).json({ error: 'conflict', message: 'Payroll is already paid' });
-  if (payroll.status !== 'locked') return res.status(409).json({ error: 'conflict', message: 'Lock the payroll before marking it paid' });
-  const [totals] = await all(
-    `SELECT COALESCE(SUM(net_inr),0) AS net, COUNT(*)::int AS c FROM payslips WHERE payroll_run_id = ?`, payroll.id);
-  if (!totals?.c) return res.status(409).json({ error: 'conflict', message: 'No payslips in this run' });
-  await withTransaction(async (tx) => {
+  const payroll = await withTransaction(async (tx) => {
+    await tx.get('SELECT pg_advisory_xact_lock(hashtext(?))', `payroll:${req.user.shop_id}`);
+    const payroll = await tx.get('SELECT * FROM payroll_runs WHERE id = ? AND shop_id = ? FOR UPDATE', req.params.id, req.user.shop_id);
+    if (!payroll) throw Object.assign(new Error('Payroll not found'), { status: 404 });
+    if (payroll.status !== 'locked') throw Object.assign(new Error('Only locked, unpaid payroll can be paid'), { status: 409 });
+    const totals = await tx.get('SELECT COALESCE(SUM(net_inr),0) AS net, COUNT(*)::int AS c FROM payslips WHERE payroll_run_id = ?', payroll.id);
+    if (!totals.c || totals.net < 0) throw Object.assign(new Error('Payroll must have payslips and a nonnegative total'), { status: 409 });
     await tx.run(`UPDATE payroll_runs SET status = 'paid', paid_at = now() WHERE id = ?`, payroll.id);
     // Post one salary expense so reports/dashboard see the payout exactly once.
     await tx.run(
       `INSERT INTO expenses (id, shop_id, category, amount_inr, spent_at, note, created_by)
        VALUES (?,?,?,?,now(),?,?)`,
-      uid('exp'), req.user.shop_id, 'salary', round2(totals.net), `Payroll ${payroll.period}`, req.user.user_id);
+       uid('exp'), req.user.shop_id, 'salary', round2(totals.net), `Payroll ${payroll.period}`, req.user.user_id);
+    return tx.get('SELECT * FROM payroll_runs WHERE id = ?', payroll.id);
   });
-  await audit(req.user.user_id, 'hr.payroll.pay', 'payroll_run', payroll.id, `${payroll.period}: ${round2(totals.net)} INR`);
-  res.json({ data: await get('SELECT * FROM payroll_runs WHERE id = ?', payroll.id) });
+  await audit(req.user.user_id, 'hr.payroll.pay', 'payroll_run', payroll.id, payroll.period);
+  res.json({ data: payroll });
 });
 
 router.get('/payslips/:id', requirePermission('payroll.view'), async (req, res) => {

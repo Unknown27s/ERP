@@ -17,6 +17,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../hooks/auth';
 import { formatInr } from '../../../lib/utils';
 import { downloadPayslipPdf } from '../../../lib/payslipPdf';
 import {
@@ -115,6 +116,8 @@ const DEDUCTIONS: Array<[keyof typeof EMPTY_SALARY, string]> = [
 ];
 
 export default function HRPayroll() {
+  const { can } = useAuth();
+  const manage = can('payroll.manage');
   const [period, setPeriod] = useState(monthNow());
   const [workingDays, setWorkingDays] = useState(String(daysInMonth(monthNow())));
   const [selectedRunId, setSelectedRunId] = useState<string>('');
@@ -127,7 +130,7 @@ export default function HRPayroll() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [showSalary, setShowSalary] = useState(false);
 
-  const employees = useQuery({ queryKey: ['hr-employees-all'], queryFn: () => api.get('/hr/employees?status=all') });
+  const employees = useQuery({ queryKey: ['payroll-employees'], queryFn: () => api.get('/hr/payroll-employees') });
   const salaries = useQuery({ queryKey: ['hr-salaries'], queryFn: () => api.get('/hr/salary') });
   const runs = useQuery({ queryKey: ['hr-payroll-runs'], queryFn: () => api.get('/hr/payroll') });
 
@@ -197,7 +200,7 @@ export default function HRPayroll() {
     if (!window.confirm(`Mark ${monthName(detail.period)} payroll as paid and record ${formatInr(totalNet)} to expenses?`)) return;
     try {
       await api.post(`/hr/payroll/${detail.id}/pay`, {});
-      toast.success('Payroll marked as paid and posted to general ledger.');
+      toast.success('Payroll marked as paid and recorded in the expense register.');
       runs.refetch();
       runDetail.refetch();
     } catch (err: any) {
@@ -256,7 +259,7 @@ export default function HRPayroll() {
         { label: 'Payroll Runs', value: String(runRows.length), meta: 'Generated periods', ...KPI_TINTS.gold },
       ]}
       actions={
-        <div className="flex items-center gap-2">
+        manage ? <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => setShowSalary(true)} className="gap-1.5 shadow-sm">
             <Calculator className="w-4 h-4 text-slate-500" />
             <span>Salary Structures</span>
@@ -265,7 +268,7 @@ export default function HRPayroll() {
             <Play className="w-4 h-4" />
             <span>Run Monthly Payroll</span>
           </Button>
-        </div>
+        </div> : null
       }
     >
       {/* ──────────────────────────────────────────────────────────────────
@@ -307,13 +310,13 @@ export default function HRPayroll() {
         {/* Action Controls for Active Run */}
         {detail && (
           <div className="flex items-center gap-2 shrink-0">
-            {detail.status === 'draft' && (
+            {manage && detail.status === 'draft' && (
               <Button size="sm" variant="outline" onClick={lockRun} className="gap-1.5 h-8 text-xs">
                 <Lock className="w-3.5 h-3.5 text-amber-600" />
                 <span>Lock Calculations</span>
               </Button>
             )}
-            {detail.status === 'locked' && (
+            {manage && detail.status === 'locked' && (
               <Button size="sm" onClick={payRun} className="gap-1.5 h-8 text-xs bg-emerald-600 hover:bg-emerald-700">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Disburse &amp; Post Expense</span>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api, inr } from '../lib/api';
 import { downloadInvoicePdf, SaleInvoiceData } from '../lib/invoicePdf';
+import GenericInvoice from './GenericInvoice';
 
 interface Props {
   saleId?: string;
@@ -38,6 +39,7 @@ export default function InvoiceModal({ saleId, initialSale, onClose }: Props) {
     window.print();
   };
 
+  if (sale?.pricing_model === 'generic') return <GenericInvoice sale={sale} close={onClose} />;
   return (
     <div
       style={{

@@ -16,6 +16,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../hooks/auth';
 import {
   CalendarRange,
   Plus,
@@ -91,6 +92,7 @@ const STATUS_FILTERS = [
 
 export default function HRLeaves() {
   const toast = useToast();
+  const { can } = useAuth();
   const [status, setStatus] = useState('pending');
   const [year, setYear] = useState(String(yearNow()));
   const [form, setForm] = useState({
@@ -202,10 +204,10 @@ export default function HRLeaves() {
         { label: 'Leave Policies', value: String(leaveTypes.length), meta: 'Configured quota types', ...KPI_TINTS.gold },
       ]}
       actions={
-        <Button onClick={() => setShowApply(true)} className="gap-1.5 shadow-sm">
+        (can('hr.manage') || can('leave.manage')) ? <Button onClick={() => setShowApply(true)} className="gap-1.5 shadow-sm">
           <Plus className="w-4 h-4" />
           <span>Apply Leave</span>
-        </Button>
+        </Button> : null
       }
     >
       {/* ──────────────────────────────────────────────────────────────────
@@ -295,7 +297,7 @@ export default function HRLeaves() {
                       </Badge>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      {l.status === 'pending' ? (
+                      {l.status === 'pending' && can('leave.approve') ? (
                         <div className="inline-flex items-center gap-1.5">
                           <Button
                             size="sm"
@@ -338,10 +340,10 @@ export default function HRLeaves() {
               <CardTitle className="text-sm font-bold text-slate-900">Leave Quota Policies</CardTitle>
               <CardDescription>Configured annual allowances and compensation terms.</CardDescription>
             </div>
-            <Button size="sm" variant="outline" onClick={() => setShowType(true)} className="h-7 px-2.5 text-xs gap-1">
+            {can('leave.manage') && <Button size="sm" variant="outline" onClick={() => setShowType(true)} className="h-7 px-2.5 text-xs gap-1">
               <Plus className="w-3.5 h-3.5" />
               <span>Policy</span>
-            </Button>
+            </Button>}
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-left text-xs text-slate-700">
@@ -376,10 +378,10 @@ export default function HRLeaves() {
               <CardTitle className="text-sm font-bold text-slate-900">Corporate &amp; Public Holidays</CardTitle>
               <CardDescription>Mandatory days off scheduled for calendar year {year}.</CardDescription>
             </div>
-            <Button size="sm" variant="outline" onClick={() => setShowHoliday(true)} className="h-7 px-2.5 text-xs gap-1">
+            {can('leave.manage') && <Button size="sm" variant="outline" onClick={() => setShowHoliday(true)} className="h-7 px-2.5 text-xs gap-1">
               <Plus className="w-3.5 h-3.5" />
               <span>Holiday</span>
-            </Button>
+            </Button>}
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-left text-xs text-slate-700">

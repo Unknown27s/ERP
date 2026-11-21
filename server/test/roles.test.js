@@ -164,10 +164,11 @@ test('barcode assign: duplicates rejected without confirm; reassign audited', as
 });
 
 test('billing flow: draft → finalize atomic; history snapshots; admin-only void', async () => {
-  const d = await api('POST', '/sales/draft', billTok, { customer_id: custId, lines: [{ product_id: prodId }] });
+  await run('UPDATE products SET selling_price_inr = 1000, tax_rate_pct = 5, stock_on_hand = 1 WHERE id = ?', prodId);
+  const d = await api('POST', '/sales/draft', billTok, { customer_id: custId, lines: [{ product_id: prodId, quantity: 1 }] });
   assert.equal(d.status, 201);
-  const est = await api('POST', '/pricing/estimate', billTok, { product_id: prodId });
-  const total = est.body.data.line_total_inr;
+  const total = d.body.data.total_inr;
+  assert.equal(total, 1050);
   const f = await api('POST', `/sales/${d.body.data.id}/finalize`, billTok, {
     lines: [{ product_id: prodId }], payments: [{ method: 'upi', amount_inr: total }],
   });
@@ -180,6 +181,7 @@ test('billing flow: draft → finalize atomic; history snapshots; admin-only voi
   // snapshot preserved, not recalculated
   const got = await api('GET', `/sales/${d.body.data.id}`, billTok);
   assert.equal(got.body.data.total_inr, f.body.data.total_inr);
+  assert.equal(got.body.data.lines[0].unit_cost_inr, undefined, 'Sales cannot see acquisition cost');
   // customer summary + recency filter see exactly one finalized bill
   const ph = await api('GET', `/customers/phone/9876500001`, billTok);
   assert.equal(ph.body.data[0].summary.bill_count, 1);

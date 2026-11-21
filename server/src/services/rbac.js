@@ -81,7 +81,7 @@ const DEFAULT_ROLES = [
   {
     name: 'Employee',
     description: 'Self-service: own details, tasks, and leave requests',
-    permissions: ['leave.view'],
+    permissions: [],
   },
 ];
 

@@ -8,7 +8,8 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { get, all, run, uid } = require('../db');
+const { get, all, run, uid, withTransaction } = require('../db');
+const { hasPermission } = require('../services/rbac');
 const { auth, requirePermission, audit } = require('../middleware/auth');
 const { PERMISSIONS, ensureRbac } = require('../services/rbac');
 
@@ -33,7 +34,8 @@ async function rolePermissions(roleId) {
 // ------------------------------------------------------------------- users
 router.get('/users', requirePermission('staff.view'), async (req, res) => {
   const rows = await all(
-    `SELECT ${SAFE_PROFILE_COLS}, r.name AS role_name
+    `SELECT ${SAFE_PROFILE_COLS}, r.name AS role_name,
+       (SELECT e.id FROM employees e WHERE e.user_id = p.user_id AND e.shop_id = p.shop_id) AS employee_id
      FROM profiles p LEFT JOIN roles r ON r.id = p.role_id
      WHERE p.shop_id = ? ORDER BY p.active DESC, r.name, p.display_name`,
     req.user.shop_id
@@ -52,17 +54,28 @@ router.post('/users', requirePermission('staff.manage'), async (req, res) => {
   }
   const role = role_id ? await roleRow(req.user.shop_id, role_id) : null;
   if (!role) return bad(res, 'choose a valid role');
+  const granted = await rolePermissions(role.id);
+  if (granted.some((key) => !hasPermission(req.user.permissions, key))) return res.status(403).json({ error: 'forbidden', message: 'Cannot assign a role with permissions you do not hold' });
+  const employee = req.body.employee;
+  if (employee) {
+    if (!hasPermission(req.user.permissions, 'hr.manage')) return res.status(403).json({ error: 'forbidden', message: 'Employee onboarding requires hr.manage' });
+    if (!String(employee.emp_code || '').trim() || !/^\d{4}-\d{2}-\d{2}$/.test(employee.joining_date || '')) return bad(res, 'Employee code and joining date are required');
+  }
 
   const id = uid('usr');
   // `profiles.role` is the legacy flag still read by older code paths;
   // new accounts are never the shop's primary administrator.
   const legacyRole = role.name === 'Administrator' ? 'admin' : 'staff';
-  await run(
+  await withTransaction(async (tx) => {
+  await tx.run(
     `INSERT INTO profiles (user_id, shop_id, role, role_id, display_name, email, phone, password_hash, active, is_primary)
      VALUES (?,?,?,?,?,?,?,?,1,0)`,
     id, req.user.shop_id, legacyRole, role.id, String(name).trim(), em,
     phone ? String(phone).trim() : null, bcrypt.hashSync(String(password), 10)
   );
+  if (employee) await tx.run(`INSERT INTO employees (id, shop_id, user_id, emp_code, full_name, email, phone, joining_date, status, employment_type)
+    VALUES (?,?,?,?,?,?,?,?,'active','full_time')`, uid('emp'), req.user.shop_id, id, String(employee.emp_code).trim(), String(name).trim(), em, phone || null, employee.joining_date);
+  });
   await audit(req.user.user_id, 'staff.create', 'profile', id, `${role.name} account ${em} (${name})`);
   res.status(201).json({
     data: await get(

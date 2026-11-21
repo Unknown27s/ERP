@@ -13,6 +13,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../../lib/api';
+import { useAuth } from '../../../hooks/auth';
 import {
   UserCheck,
   Plus,
@@ -33,7 +34,6 @@ import { Input } from '../../../components/ui/Input';
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
 import { useToast } from '../../../components/ui/Toast';
-import { useAuth } from '../../../hooks/auth';
 import {
   Dialog,
   DialogContent,
@@ -123,6 +123,7 @@ const STATUS_FILTERS = [
 export default function HREmployees() {
   const toast = useToast();
   const { can } = useAuth();
+  const manage = can('hr.manage');
   const [status, setStatus] = useState('active');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -244,7 +245,7 @@ export default function HREmployees() {
         { label: 'Exited', value: countOf('exited'), meta: 'Historical records retained', ...KPI_TINTS.rose },
       ]}
       actions={
-        can('hr.manage') ? <Button onClick={() => { reset(); setShowForm(true); }} className="gap-1.5 shadow-sm">
+        manage ? <Button onClick={() => { reset(); setShowForm(true); }} className="gap-1.5 shadow-sm">
           <Plus className="w-4 h-4" />
           <span>Add Employee</span>
         </Button> : null
@@ -355,7 +356,7 @@ export default function HREmployees() {
                     <div className="inline-flex items-center gap-1.5">
                       <Button variant="ghost" size="sm" onClick={() => setSelectedId(e.id)}
                         className="h-7 px-2 text-[11px]"><Eye className="w-3.5 h-3.5 mr-1" />View</Button>
-                      {can('hr.manage') && <Button
+                      {manage && <Button
                         variant="outline"
                         size="sm"
                         onClick={() => startEdit(e)}
@@ -363,7 +364,7 @@ export default function HREmployees() {
                       >
                         Edit
                       </Button>}
-                      {can('hr.manage') && e.status !== 'exited' && (
+                      {manage && e.status !== 'exited' && (
                         <Button
                           variant="ghost"
                           size="sm"

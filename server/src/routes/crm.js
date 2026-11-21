@@ -283,11 +283,11 @@ router.get('/reports/sales', requirePermission('reports.view'), async (req, res)
   const revenue = rows.reduce((a, r) => a + r.total_inr, 0);
   const bills = rows.length;
   const custIds = new Set(rows.map(r => r.customer_id).filter(Boolean));
-  const items = await get(`SELECT COUNT(*) n, COALESCE(SUM(si.net_gold_weight_g),0) w FROM sale_items si JOIN sales s ON s.id=si.sale_id
+  const items = await get(`SELECT COALESCE(SUM(si.quantity),0) n, COALESCE(SUM(si.net_gold_weight_g),0) w FROM sale_items si JOIN sales s ON s.id=si.sale_id
     WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized'`, req.user.shop_id, s, e);
   const byDay = await all(`SELECT ${dayExpr('sold_at')} d, COUNT(*) bills, SUM(total_inr) revenue FROM sales
     WHERE shop_id=? AND sold_at>=? AND sold_at<=? AND status='finalized' GROUP BY d ORDER BY d`, req.user.shop_id, s, e);
-  const byCat = await all(`SELECT c.name category, COUNT(*) pieces, SUM(si.line_total_inr) revenue FROM sale_items si
+  const byCat = await all(`SELECT c.name category, SUM(si.quantity) pieces, SUM(si.line_total_inr) revenue FROM sale_items si
     JOIN sales s ON s.id=si.sale_id JOIN products p ON p.id=si.product_id LEFT JOIN categories c ON c.id=p.category_id
     WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized' GROUP BY c.name`, req.user.shop_id, s, e);
   const byPay = await all(`SELECT py.method, SUM(py.amount_inr) total FROM payments py JOIN sales s ON s.id=py.sale_id
@@ -297,7 +297,7 @@ router.get('/reports/sales', requirePermission('reports.view'), async (req, res)
   // user may hold reports.view without finance.view.
   const canSeeCost = hasPermission(req.user.permissions, 'finance.view');
   if (canSeeCost) {
-    cogs = (await get(`SELECT COALESCE(SUM(p.acquisition_cost_inr),0) c FROM sale_items si JOIN sales s ON s.id=si.sale_id
+    cogs = (await get(`SELECT COALESCE(SUM(COALESCE(si.unit_cost_inr,p.acquisition_cost_inr) * si.quantity),0) c FROM sale_items si JOIN sales s ON s.id=si.sale_id
       JOIN products p ON p.id=si.product_id WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized'`, req.user.shop_id, s, e)).c;
   }
   res.json({ data: {
@@ -346,10 +346,10 @@ router.get('/reports/category-products', requirePermission('reports.view'), asyn
   res.json({ data: rows, summary, category: category || null, from: s, to: e });
 });
 router.get('/reports/inventory', requirePermission('reports.view'), async (req, res) => {
-  const byCat = await all(`SELECT c.name category, COUNT(*) pieces, SUM(p.net_gold_weight_g) weight_g, SUM(p.acquisition_cost_inr) acq_inr
+  const byCat = await all(`SELECT c.name category, SUM(p.stock_on_hand - p.stock_reserved) pieces, 0 AS weight_g, SUM(p.acquisition_cost_inr * (p.stock_on_hand - p.stock_reserved)) acq_inr
     FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.shop_id=? AND p.status='available' GROUP BY c.name`, req.user.shop_id);
-  const low = await all(`SELECT c.name category, COUNT(*) n FROM products p LEFT JOIN categories c ON c.id=p.category_id
-    WHERE p.shop_id=? AND p.status='available' GROUP BY c.name HAVING COUNT(*) < 5`, req.user.shop_id);
+  const low = await all(`SELECT c.name category, SUM(p.stock_on_hand - p.stock_reserved) n FROM products p LEFT JOIN categories c ON c.id=p.category_id
+    WHERE p.shop_id=? AND p.status='available' GROUP BY c.name HAVING SUM(p.stock_on_hand - p.stock_reserved) < 5`, req.user.shop_id);
   if (!hasPermission(req.user.permissions, 'finance.view')) {
     for (const row of byCat) delete row.acq_inr;
   }

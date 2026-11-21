@@ -63,6 +63,7 @@ type UserRow = {
   active: number;
   is_primary: number;
   last_login_at: string | null;
+  employee_id?: string | null;
 };
 
 type RoleRow = {
@@ -403,6 +404,10 @@ function UserFormDialog({
   onError: (m: string) => void;
 }) {
   const editing = Boolean(user);
+  const { can } = useAuth();
+  const [createEmployee, setCreateEmployee] = useState(can('hr.manage'));
+  const [empCode, setEmpCode] = useState('');
+  const [joiningDate, setJoiningDate] = useState('');
   const [name, setName] = useState(user?.display_name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [phone, setPhone] = useState(user?.phone || '');
@@ -417,7 +422,9 @@ function UserFormDialog({
       if (editing) {
         await api.patch(`/staff/users/${user!.user_id}`, { name, phone, role_id: roleId });
       } else {
-        await api.post('/staff/users', { name, email, phone, role_id: roleId, password });
+        await api.post('/staff/users', { name, email, phone, role_id: roleId, password,
+          ...(createEmployee ? { employee: { emp_code: empCode, joining_date: joiningDate } } : {}),
+        });
       }
       onSaved();
     } catch (e: any) {
@@ -487,6 +494,11 @@ function UserFormDialog({
               />
             </div>
           )}
+
+          {!editing && can('hr.manage') && <div className="space-y-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
+            <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={createEmployee} onChange={(e) => setCreateEmployee(e.target.checked)} />Create linked employee profile</label>
+            {createEmployee && <><label className="block text-xs">Employee code<Input required value={empCode} onChange={(e) => setEmpCode(e.target.value)} /></label><label className="block text-xs">Joining date<Input required type="date" value={joiningDate} onChange={(e) => setJoiningDate(e.target.value)} /></label><p className="text-xs text-slate-500">Next: HR → Employees for department/details, then Payroll → Salary Structures. The login is linked automatically.</p></>}
+          </div>}
 
           <DialogFooter>
             <Button variant="outline" type="button" onClick={onClose}>

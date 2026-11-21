@@ -22,11 +22,15 @@ export interface SaleInvoiceData {
   total_inr: number;
   rate_24k_per_g_inr?: number;
   status?: string;
+  pricing_model?: string;
   lines?: Array<{
     id?: string;
     product_id?: string;
     sku: string;
     name: string;
+    quantity?: number;
+    unit_price_inr?: number;
+    tax_rate_pct?: number;
     purity: string;
     net_gold_weight_g: number;
     rate_24k_per_g_inr?: number;

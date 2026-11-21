@@ -23,6 +23,7 @@ async function req(path: string, opts: RequestInit = {}) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401 && path !== '/auth/login') window.dispatchEvent(new Event('erp:unauthorized'));
     const err: any = new Error((body as any).message || (body as any).error || `HTTP ${res.status}`);
     // Keep the server's structured context (duplicate rows, missing fields, …)
     // so dialogs can explain the failure instead of only showing a message.

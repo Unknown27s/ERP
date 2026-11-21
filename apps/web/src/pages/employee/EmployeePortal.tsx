@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAuth } from '../../hooks/auth';
@@ -84,7 +85,9 @@ const money = (n: number | string | null | undefined) =>
   '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?: string }) {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(initialTab);
+  useEffect(() => setActiveTab(initialTab), [initialTab]);
   const { user, refreshUser } = useAuth();
   const { brand } = useBranding();
   const qc = useQueryClient();
@@ -164,8 +167,12 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Photo must be less than 5MB');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      alert('Choose a JPEG, PNG or WebP photo');
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      alert('Photo must be less than 1MB');
       return;
     }
     const reader = new FileReader();
@@ -326,10 +333,11 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
           <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
             <AlertCircle className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">Employee Profile Not Linked</h2>
+          <h2 className="text-xl font-bold text-slate-900">{(meError as any)?.body?.error === 'employee_not_linked' ? 'Employee Profile Not Linked' : 'Unable to load your profile'}</h2>
           <p className="text-sm text-slate-500">
-            Your login account (<strong>{user?.email}</strong>) is not yet linked to an employee record in this company.
+            {(meError as any)?.body?.error === 'employee_not_linked' ? `Your login account (${user?.email}) is not yet linked to an employee record.` : 'The server could not load your profile. Check your connection and try again.'}
           </p>
+          <button className="btn ghost" onClick={() => refetchMe()}>Try again</button>
           <p className="text-xs text-slate-400">
             Please ask HR or your administrator to link your profile under <strong>Human Resources → Employees</strong>.
           </p>
@@ -437,7 +445,7 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => navigate(tab.id === 'profile' ? '/employee' : `/employee/${tab.id}`)}
               className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium text-xs whitespace-nowrap transition-colors ${
                 isActive
                   ? 'border-brand-600 text-brand-600 font-semibold'

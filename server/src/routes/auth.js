@@ -42,6 +42,17 @@ router.post('/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 20 }), async (r
 });
 
 router.get('/me', auth, (req, res) => res.json({ user: req.user }));
+router.post('/change-password', auth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof newPassword !== 'string' || newPassword.length < 12 || newPassword.length > 128) {
+    return res.status(400).json({ error: 'bad_request', message: 'New password must contain 12–128 characters' });
+  }
+  const row = await get('SELECT * FROM profiles WHERE user_id = ?', req.user.user_id);
+  if (!bcrypt.compareSync(String(currentPassword || ''), row.password_hash)) return res.status(403).json({ error: 'forbidden', message: 'Current password is incorrect' });
+  await run('UPDATE profiles SET password_hash = ?, token_version = token_version + 1 WHERE user_id = ?', bcrypt.hashSync(newPassword, 10), row.user_id);
+  await audit(row.user_id, 'auth.password.change', 'profile', row.user_id, 'Password changed; sessions revoked');
+  res.json({ ok: true });
+});
 router.post('/logout', auth, async (req, res) => {
   // Invalidate tokens by incrementing token_version (H2)
   await run('UPDATE profiles SET token_version = token_version + 1 WHERE user_id = ?', req.user.user_id);

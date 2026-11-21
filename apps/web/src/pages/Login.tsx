@@ -36,6 +36,13 @@ import {
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 
+const DEMO_ACCOUNTS: PreviewAccount[] = [
+  { name: 'Admin', role: 'Full access', email: 'admin@marvelsoftware.local', password: 'Admin@123' },
+  { name: 'HR', role: 'People & Leave', email: 'hr@marvelsoftware.local', password: 'Hr@12345' },
+  { name: 'Finance', role: 'Books & Payroll', email: 'finance@marvelsoftware.local', password: 'Finance@123' },
+  { name: 'Employee', role: 'Self-service', email: 'employee@marvelsoftware.local', password: 'Employee@123' },
+];
+
 export default function Login() {
   const { login } = useAuth();
   const { brand } = useBranding();
@@ -51,7 +58,8 @@ export default function Login() {
   // Runtime branding resolved from server (/api/config)
   const productName = brand.product_name || brand.company_name || 'MarvelSoftware';
   const companyName = brand.company_name || 'MarvelSoftware Inc.';
-  const previewAccounts = brand.preview?.enabled ? brand.preview.accounts : [];
+  // Runtime preview accounts override the seeded defaults in every build mode.
+  const previewAccounts = brand.preview?.enabled && brand.preview.accounts.length ? brand.preview.accounts : DEMO_ACCOUNTS;
 
   /* ── 1. Form Submission Handler ─────────────────────────────────────────── */
   const handleSubmit = async (e: React.FormEvent) => {
@@ -62,7 +70,8 @@ export default function Login() {
 
     try {
       await login(email, password);
-      navigate('/admin');
+      const me = await import('../lib/api').then(({ api }) => api.get('/auth/me'));
+      navigate(me.user.role_name === 'Employee' ? '/employee' : '/admin', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Invalid credentials. Please verify your email and password.');
     } finally {
@@ -183,7 +192,7 @@ export default function Login() {
 
           {/* Error Banner */}
           {error && (
-            <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm flex items-start gap-2.5 animate-in fade-in">
+            <div role="alert" className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm flex items-start gap-2.5 animate-in fade-in">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-2 shrink-0" />
               <span>{error}</span>
             </div>
@@ -192,10 +201,12 @@ export default function Login() {
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+              <label htmlFor="login-email" className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                 Work Email
               </label>
               <Input
+                id="login-email"
+                autoComplete="username"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -207,13 +218,15 @@ export default function Login() {
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                <label htmlFor="login-password" className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                   Password
                 </label>
               </div>
               <div className="relative">
                 <Input
                   ref={passwordRef}
+                  id="login-password"
+                  autoComplete="current-password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -223,6 +236,7 @@ export default function Login() {
                 />
                 <button
                   type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
                 >
@@ -250,15 +264,14 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Preview roster: existing person logins, no separate demo mailbox */}
-          {previewAccounts.length > 0 && (
-            <div className="pt-6 border-t border-slate-200">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-semibold text-slate-700">Preview as a team member</span>
-                <span className="text-[11px] font-semibold text-brand-600">Fills email + password</span>
+          {/* Demo role selection is intentionally available in production too. */}
+          <div className="pt-6 border-t border-slate-200">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-slate-500">Explore with a demo account</span>
+                <span className="text-[11px] font-semibold text-brand-600">Click to fill</span>
               </div>
               <p className="text-[11px] text-slate-500 mb-3">
-                Pick a person to fill their work email and preview password, then sign in. No separate preview account is created.
+                Choose an account to fill the sign-in form. Server authentication and role permissions still apply.
               </p>
               <div className="grid grid-cols-2 gap-2">
                 {previewAccounts.map((a) => (
@@ -278,8 +291,8 @@ export default function Login() {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">Shared demo accounts. Use sample data only; do not enter personal or confidential information.</p>
+          </div>
         </div>
       </div>
     </div>

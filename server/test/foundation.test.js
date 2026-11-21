@@ -136,7 +136,7 @@ test('403: a role without a permission is blocked by the API', async () => {
   // The dashboard only exposes sections the caller may see.
   const dash = await api('GET', '/dashboard', employeeTok);
   assert.equal(dash.status, 200);
-  assert.equal(typeof dash.body.data.headcount, 'number');
+  assert.equal(dash.body.data.headcount, null);
   assert.equal(dash.body.data.customers, null);
   assert.equal(dash.body.data.payroll_net, null);
 });
