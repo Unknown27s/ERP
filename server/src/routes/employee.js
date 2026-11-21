@@ -26,6 +26,16 @@ const isDate = (v) => typeof v === 'string' && DATE_RE.test(v);
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+function taskTiming(startedAt, endedAt, workDate) {
+  if (!startedAt || !endedAt) return null; // legacy hours-only entries
+  const start = new Date(startedAt);
+  const end = new Date(endedAt);
+  const hours = (end.getTime() - start.getTime()) / 3600000;
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 24 ||
+      dateInTz(start) !== workDate || dateInTz(end) !== workDate) return null;
+  return { start: start.toISOString(), end: end.toISOString(), hours: round2(hours) };
+}
+
 function bad(res, message) {
   return res.status(400).json({ error: 'bad_request', message });
 }
@@ -296,24 +306,27 @@ router.post('/tasks', async (req, res) => {
   const emp = await resolveEmployee(req);
   if (!emp) return res.status(404).json({ error: 'employee_not_linked' });
 
-  const { task_title, description, tag, hours_spent, work_date, status, project_or_lead_ref } = req.body || {};
+  const { task_title, description, tag, hours_spent, work_date, status, project_or_lead_ref, started_at, ended_at } = req.body || {};
   const cleanTitle = String(task_title || '').trim();
   if (!cleanTitle) return bad(res, 'task_title required');
 
   const date = work_date && isDate(work_date) ? work_date : today();
-  const hours = num(hours_spent) > 0 ? round2(hours_spent) : 1.0;
   const cleanTag = String(tag || 'general').trim().toLowerCase().replace(/^#/, '');
   const cleanStatus = ['completed', 'in_progress', 'blocked'].includes(status) ? status : 'completed';
+  if (!started_at || !ended_at) return bad(res, 'Start and end times are required for new tasks');
+  const timing = taskTiming(started_at, ended_at, date);
+  if (!timing) return bad(res, 'Start and end must be on the work date, in order, and within 24 hours');
 
   const id = uid('tsk');
   await run(
-    `INSERT INTO employee_tasks (id, shop_id, employee_id, work_date, task_title, description, tag, hours_spent, status, project_or_lead_ref)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO employee_tasks (id, shop_id, employee_id, work_date, task_title, description, tag, hours_spent, status, project_or_lead_ref, started_at, ended_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     id, req.user.shop_id, emp.id, date, cleanTitle, description ? String(description).trim() : null,
-    cleanTag, hours, cleanStatus, project_or_lead_ref ? String(project_or_lead_ref).trim() : null
+    cleanTag, timing.hours, cleanStatus, project_or_lead_ref ? String(project_or_lead_ref).trim() : null,
+    timing.start, timing.end
   );
 
-  await audit(req.user.user_id, 'employee.task.create', 'task', id, `${date} ${cleanTag}: ${cleanTitle} (${hours}h)`);
+  await audit(req.user.user_id, 'employee.task.create', 'task', id, `${date} ${cleanTag}: ${cleanTitle} (${timing.hours}h)`);
   res.status(201).json({ data: await get('SELECT * FROM employee_tasks WHERE id = ?', id) });
 });
 
@@ -348,12 +361,21 @@ router.patch('/tasks/:id', async (req, res) => {
   if (b.hours_spent !== undefined) {
     const h = num(b.hours_spent);
     if (h <= 0) return bad(res, 'hours_spent must be > 0');
-    updates.push('hours_spent = ?');
-    args.push(round2(h));
+    if (!task.started_at && !task.ended_at && b.started_at === undefined && b.ended_at === undefined) {
+      updates.push('hours_spent = ?');
+      args.push(round2(h)); // legacy hours-only logs
+    }
   }
   if (b.work_date !== undefined && isDate(b.work_date)) {
     updates.push('work_date = ?');
     args.push(b.work_date);
+  }
+  if (b.started_at !== undefined || b.ended_at !== undefined || task.started_at || task.ended_at) {
+    const date = b.work_date || task.work_date;
+    const timing = taskTiming(b.started_at ?? task.started_at, b.ended_at ?? task.ended_at, date);
+    if (!timing) return bad(res, 'Start and end must be on the work date, in order, and within 24 hours');
+    updates.push('started_at = ?', 'ended_at = ?', 'hours_spent = ?');
+    args.push(timing.start, timing.end, timing.hours);
   }
   if (b.status !== undefined && ['completed', 'in_progress', 'blocked'].includes(b.status)) {
     updates.push('status = ?');

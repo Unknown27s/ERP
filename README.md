@@ -127,6 +127,8 @@ The login screen lists the seeded staff accounts so a reviewer can click a card 
 - `PREVIEW_EMAILS=a@x,b@y` overrides which accounts appear; by default the roster is the seven seeded logins above.
 - `PREVIEW_PASSWORDS=a@x:pass,b@y:pass` overrides the preview passwords (defaults follow the seed credentials).
 - `GET /api/config` returns `{ name, email, role, password }` for the roster while preview is enabled. Treat that endpoint as demo-only and disable it before real staff use.
+- In demo mode, the admin sidebar also has a collapsed **Demo sign-in accounts** menu. Choose a role to see its email and reveal its preview password. This menu is absent unless `PREVIEW_LOGIN=1`.
+- Accounts whose passwords have been changed are omitted rather than showing an invalid seeded password.
 
 
 ---

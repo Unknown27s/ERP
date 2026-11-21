@@ -14,7 +14,7 @@ export type Branding = {
   company_name: string;
   timezone?: string;
   currency?: string;
-  /** Existing person accounts offered as sign-in previews. Never includes passwords. */
+  /** Demo-only roster; may include passwords only when PREVIEW_LOGIN=1. */
   preview?: { enabled: boolean; accounts: PreviewAccount[] };
 };
 

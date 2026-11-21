@@ -71,8 +71,14 @@ const DEFAULT_TAGS = [
   'admin',
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const monthNow = () => new Date().toISOString().slice(0, 7);
+const localTime = (iso?: string | null) => iso
+  ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+  : '';
 
 const money = (n: number | string | null | undefined) =>
   '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -188,6 +194,8 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
     tag: 'development',
     hours_spent: 1.0,
     work_date: today(),
+    start_time: '09:00',
+    end_time: '10:00',
     status: 'completed',
     project_or_lead_ref: '',
   });
@@ -200,6 +208,8 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
       tag: 'development',
       hours_spent: 1.0,
       work_date: today(),
+      start_time: '09:00',
+      end_time: '10:00',
       status: 'completed',
       project_or_lead_ref: '',
     });
@@ -214,6 +224,8 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
       tag: t.tag || 'development',
       hours_spent: t.hours_spent || 1.0,
       work_date: t.work_date || today(),
+      start_time: localTime(t.started_at),
+      end_time: localTime(t.ended_at),
       status: t.status || 'completed',
       project_or_lead_ref: t.project_or_lead_ref || '',
     });
@@ -223,11 +235,23 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
   const handleSaveTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!taskForm.task_title.trim()) return alert('Task title is required');
+    const timesProvided = !!(taskForm.start_time && taskForm.end_time);
+    if (!editingTask && !timesProvided) return alert('Start and end times are required');
+    if (Boolean(taskForm.start_time) !== Boolean(taskForm.end_time)) return alert('Enter both start and end times');
+    const start = timesProvided ? new Date(`${taskForm.work_date}T${taskForm.start_time}`) : null;
+    const end = timesProvided ? new Date(`${taskForm.work_date}T${taskForm.end_time}`) : null;
+    if (start && end && (end.getTime() <= start.getTime() || (end.getTime() - start.getTime()) > 86400000)) {
+      return alert('End time must be after start time on the same date');
+    }
+    const { start_time, end_time, ...fields } = taskForm;
+    const payload = timesProvided
+      ? { ...fields, started_at: start!.toISOString(), ended_at: end!.toISOString() }
+      : fields;
     try {
       if (editingTask) {
-        await api.patch(`/employee/tasks/${editingTask.id}`, taskForm);
+        await api.patch(`/employee/tasks/${editingTask.id}`, payload);
       } else {
-        await api.post('/employee/tasks', taskForm);
+        await api.post('/employee/tasks', payload);
       }
       setTaskModalOpen(false);
       refetchTasks();
@@ -585,6 +609,7 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
                     <th className="py-3 px-4">Task Title &amp; Details</th>
                     <th className="py-3 px-4">Tag</th>
                     <th className="py-3 px-4">Hours</th>
+                    <th className="py-3 px-4">Start – End</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
@@ -592,7 +617,7 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
                 <tbody className="divide-y divide-slate-100">
                   {(tasksData?.data || []).length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-400">
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
                         No completed tasks logged yet. Click <strong>"Log Completed Task"</strong> to add your work.
                       </td>
                     </tr>
@@ -621,6 +646,9 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
                           </td>
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span className="font-bold text-slate-800">{Number(t.hours_spent || 0).toFixed(1)}h</span>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-slate-600">
+                            {t.started_at && t.ended_at ? `${localTime(t.started_at)} – ${localTime(t.ended_at)}` : 'Not recorded'}
                           </td>
                           <td className="py-3 px-4 whitespace-nowrap">
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
@@ -1038,19 +1066,6 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">Hours Spent *</label>
-                  <input
-                    type="number"
-                    step="0.25"
-                    min="0.25"
-                    max="24"
-                    required
-                    value={taskForm.hours_spent}
-                    onChange={(e) => setTaskForm({ ...taskForm, hours_spent: parseFloat(e.target.value) || 0.5 })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-                <div className="space-y-1">
                   <label className="font-semibold text-slate-700">Date Completed *</label>
                   <input
                     type="date"
@@ -1060,7 +1075,24 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-500"
                   />
                 </div>
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">Start time *</label>
+                  <input type="time" required={!editingTask} value={taskForm.start_time}
+                    onChange={(e) => setTaskForm({ ...taskForm, start_time: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200" />
+                </div>
+                <div className="space-y-1">
+                  <label className="font-semibold text-slate-700">End time *</label>
+                  <input type="time" required={!editingTask} value={taskForm.end_time}
+                    onChange={(e) => setTaskForm({ ...taskForm, end_time: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200" />
+                </div>
               </div>
+              <p className="text-[11px] text-slate-500">
+                {taskForm.start_time && taskForm.end_time
+                  ? `Duration: ${Math.max(0, (new Date(`${taskForm.work_date}T${taskForm.end_time}`).getTime() - new Date(`${taskForm.work_date}T${taskForm.start_time}`).getTime()) / 3600000).toFixed(2)} hours (calculated automatically)`
+                  : 'Older tasks without times keep their original recorded hours until times are added.'}
+              </p>
 
               <div className="space-y-1">
                 <label className="font-semibold text-slate-700">Project / CRM Lead Reference (optional)</label>

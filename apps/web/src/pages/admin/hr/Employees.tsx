@@ -24,6 +24,8 @@ import {
   LogOut,
   Mail,
   Phone,
+  Clock3,
+  Eye,
 } from 'lucide-react';
 import HrShell, { KPI_TINTS, useHrOverview } from './HrShell';
 import { Button } from '../../../components/ui/Button';
@@ -31,6 +33,7 @@ import { Input } from '../../../components/ui/Input';
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
 import { useToast } from '../../../components/ui/Toast';
+import { useAuth } from '../../../hooks/auth';
 import {
   Dialog,
   DialogContent,
@@ -119,11 +122,24 @@ const STATUS_FILTERS = [
 
 export default function HREmployees() {
   const toast = useToast();
+  const { can } = useAuth();
   const [status, setStatus] = useState('active');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editId, setEditId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [workMonth, setWorkMonth] = useState(new Date().toISOString().slice(0, 7));
+  const detail = useQuery({
+    queryKey: ['hr-employee-detail', selectedId],
+    queryFn: () => api.get(`/hr/employees/${selectedId}`),
+    enabled: !!selectedId,
+  });
+  const work = useQuery({
+    queryKey: ['hr-employee-work', selectedId, workMonth],
+    queryFn: () => api.get(`/hr/employees/${selectedId}/work?month=${workMonth}`),
+    enabled: !!selectedId,
+  });
 
   // Queries for employee records and dropdown lookups
   const list = useQuery({
@@ -228,10 +244,10 @@ export default function HREmployees() {
         { label: 'Exited', value: countOf('exited'), meta: 'Historical records retained', ...KPI_TINTS.rose },
       ]}
       actions={
-        <Button onClick={() => { reset(); setShowForm(true); }} className="gap-1.5 shadow-sm">
+        can('hr.manage') ? <Button onClick={() => { reset(); setShowForm(true); }} className="gap-1.5 shadow-sm">
           <Plus className="w-4 h-4" />
           <span>Add Employee</span>
-        </Button>
+        </Button> : null
       }
     >
       {/* Control Bar: Search & Status Filter Pills */}
@@ -297,7 +313,8 @@ export default function HREmployees() {
                 <tr key={e.id} className="hover:bg-slate-50/70 transition-colors">
                   <td className="py-3 px-4 font-mono font-bold text-slate-900">{e.emp_code}</td>
                   <td className="py-3 px-4">
-                    <div className="font-semibold text-slate-900">{e.full_name}</div>
+                    <button type="button" onClick={() => setSelectedId(e.id)}
+                      className="font-semibold text-brand-700 hover:underline text-left">{e.full_name}</button>
                     <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
                       {e.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{e.email}</span>}
                       {e.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{e.phone}</span>}
@@ -336,15 +353,17 @@ export default function HREmployees() {
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="inline-flex items-center gap-1.5">
-                      <Button
+                      <Button variant="ghost" size="sm" onClick={() => setSelectedId(e.id)}
+                        className="h-7 px-2 text-[11px]"><Eye className="w-3.5 h-3.5 mr-1" />View</Button>
+                      {can('hr.manage') && <Button
                         variant="outline"
                         size="sm"
                         onClick={() => startEdit(e)}
                         className="h-7 px-2.5 text-[11px]"
                       >
                         Edit
-                      </Button>
-                      {e.status !== 'exited' && (
+                      </Button>}
+                      {can('hr.manage') && e.status !== 'exited' && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -362,6 +381,104 @@ export default function HREmployees() {
           </table>
         </div>
       </Card>
+
+      {selectedId && (
+        <Dialog open onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+          <DialogContent size="lg">
+            <DialogHeader>
+              <DialogTitle>{detail.data?.data?.full_name || 'Employee details'}</DialogTitle>
+              <DialogDescription>Profile and work records for this employee only.</DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[65vh] overflow-y-auto space-y-5 text-sm pr-1">
+              {detail.isLoading ? <p>Loading employee…</p> : detail.isError ? (
+                <p className="text-rose-600">Could not load employee details.</p>
+              ) : detail.data?.data && (
+                <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4">
+                  {([
+                    ['Code', detail.data.data.emp_code],
+                    ['Status', detail.data.data.status],
+                    ['Department', detail.data.data.department_name],
+                    ['Designation', detail.data.data.designation_name],
+                    ['Email', detail.data.data.linked_user_email || detail.data.data.email],
+                    ['Phone', detail.data.data.phone],
+                    ['Joined', detail.data.data.joining_date],
+                    ['Manager', detail.data.data.manager_name],
+                    ['Employment type', detail.data.data.employment_type],
+                    ['Branch', detail.data.data.branch_name],
+                    ['Address', detail.data.data.address],
+                    ['PAN', detail.data.data.pan],
+                    ['Bank account', detail.data.data.bank_account],
+                    ['IFSC', detail.data.data.bank_ifsc],
+                  ] as [string, string | null][]).map(([label, value]) => (
+                    value ? <div key={label}><div className="text-xs text-slate-500">{label}</div>
+                      <div className="font-medium text-slate-800 break-words">{value || '—'}</div></div>
+                    : null
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-semibold text-slate-900">Work activity</h3>
+                <input aria-label="Work month" type="month" value={workMonth}
+                  onChange={(e) => setWorkMonth(e.target.value)} className="w-auto text-xs" />
+              </div>
+              {work.isLoading ? <p className="text-slate-500">Loading work records…</p> : work.isError ? (
+                <p className="text-rose-600">Could not load work records.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge variant="info">{work.data?.data?.summary?.task_count || 0} tasks</Badge>
+                    <Badge variant="secondary">{work.data?.data?.summary?.task_hours || 0} task hours</Badge>
+                    <Badge variant="secondary">{((work.data?.data?.summary?.clocked_minutes || 0) / 60).toFixed(1)} clocked hours</Badge>
+                  </div>
+                  <div className="space-y-2">
+                    {(work.data?.data?.tasks || []).map((task: any) => (
+                      <div key={task.id} className="rounded-lg border border-slate-200 p-3">
+                        <div className="flex justify-between gap-2">
+                          <strong className="text-slate-900">{task.task_title}</strong>
+                          <span className="text-xs text-slate-500 whitespace-nowrap">{task.work_date}</span>
+                        </div>
+                        <p className="text-xs text-slate-600">{task.description || task.tag}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {task.started_at && task.ended_at
+                            ? `${new Date(task.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(task.ended_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                            : 'Legacy entry (no start/end time)'} · {task.hours_spent}h · {task.status}
+                        </p>
+                      </div>
+                    ))}
+                    {!work.data?.data?.tasks?.length && <p className="text-slate-500">No tasks this month.</p>}
+                  </div>
+                  <h4 className="flex items-center gap-2 font-semibold"><Clock3 className="w-4 h-4" /> Work sessions</h4>
+                  {(work.data?.data?.sessions || []).map((session: any) => (
+                    <p key={session.id} className="text-xs text-slate-600">
+                      {session.work_date}: {new Date(session.clock_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {' – '}{session.clock_out ? new Date(session.clock_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Active'}
+                      {session.clock_out ? ` (${session.total_minutes} min)` : ''}
+                    </p>
+                  ))}
+                  <h4 className="font-semibold">Attendance</h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(work.data?.data?.attendance || []).map((day: any) => (
+                      <Badge key={day.work_date} variant="secondary">{day.work_date}: {day.status}</Badge>
+                    ))}
+                    {!work.data?.data?.attendance?.length && <span className="text-xs text-slate-500">No attendance recorded.</span>}
+                  </div>
+                  {can('payroll.view') && !!detail.data?.data?.salary_structures?.length && (
+                    <div className="border-t pt-3">
+                      <h4 className="font-semibold">Salary structures</h4>
+                      {detail.data.data.salary_structures.map((structure: any) => (
+                        <p key={structure.id} className="text-xs text-slate-600">
+                          Effective {structure.effective_from} · Basic ₹{Number(structure.basic_inr).toLocaleString('en-IN')}
+                          {' · '}HRA ₹{Number(structure.hra_inr).toLocaleString('en-IN')}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Add / Edit Employee Dialog */}
       {showForm && (

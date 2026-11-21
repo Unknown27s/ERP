@@ -10,6 +10,7 @@
     "start": "node src/index.js",
     "seed": "node src/seed.js",
     "seed:demo": "node src/seed-demo.js",
+    "seed:reports": "node src/seed-reports.js",
     "migrate": "node src/migrate.js",
     "test": "node --require ./test/setup-env.js --test"
   },

@@ -6,6 +6,7 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const { get, all, initDb } = require('./db');
+const bcrypt = require('bcryptjs');
 
 // Fail closed immediately if JWT_SECRET is unset or weak (C2)
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
@@ -98,8 +99,8 @@ function previewPasswords() {
   return { ...PREVIEW_PASSWORDS, ...overrides };
 }
 
-async function loadPreviewAccounts() {
-  if (process.env.PREVIEW_LOGIN !== '1') return [];
+async function loadPreviewAccounts(shopId) {
+  if (process.env.PREVIEW_LOGIN !== '1' || !shopId) return [];
   const emails = (process.env.PREVIEW_EMAILS || PREVIEW_EMAILS.join(','))
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -108,26 +109,28 @@ async function loadPreviewAccounts() {
   const passwords = previewPasswords();
   try {
     const rows = await all(
-      `SELECT p.display_name, p.email, COALESCE(r.name, p.role) AS role_name
-         FROM profiles p LEFT JOIN roles r ON r.id = p.role_id
-        WHERE p.active = 1 AND lower(p.email) IN (${emails.map(() => '?').join(',')})`,
-      ...emails
+      `SELECT p.display_name, p.email, p.password_hash, COALESCE(r.name, p.role) AS role_name
+          FROM profiles p LEFT JOIN roles r ON r.id = p.role_id
+         WHERE p.active = 1 AND p.shop_id = ? AND lower(p.email) IN (${emails.map(() => '?').join(',')})`,
+      shopId, ...emails
     );
     rows.sort((a, b) => {
       const ai = PREVIEW_ROLE_ORDER.indexOf(a.role_name);
       const bi = PREVIEW_ROLE_ORDER.indexOf(b.role_name);
       return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi) || String(a.display_name).localeCompare(String(b.display_name));
     });
-    return rows.map((r) => {
+    const verified = await Promise.all(rows.map(async (r) => {
       const email = String(r.email).toLowerCase();
+      const password = passwords[email];
+      if (!password || !r.password_hash || !(await bcrypt.compare(password, r.password_hash))) return null;
       return {
         name: r.display_name,
         email: r.email,
         role: r.role_name,
-        // Present only for the seeded demo accounts or PREVIEW_PASSWORDS.
-        password: passwords[email],
+        password,
       };
-    });
+    }));
+    return verified.filter(Boolean);
   } catch (e) {
     console.error('[config] preview roster unavailable:', e.message);
     return [];
@@ -138,9 +141,11 @@ async function loadPreviewAccounts() {
 // so a rename in Settings is reflected immediately.
 app.get('/api/config', async (req, res, next) => {
   try {
-    const accounts = await loadPreviewAccounts();
+    if (process.env.PREVIEW_LOGIN === '1') res.set('Cache-Control', 'no-store');
+    const shop = await get('SELECT id FROM shops WHERE name = ? ORDER BY id LIMIT 1',
+      process.env.COMPANY_NAME || 'MarvelSoftware') || await get('SELECT id FROM shops ORDER BY id LIMIT 1');
+    const accounts = await loadPreviewAccounts(shop?.id);
     const preview = { enabled: accounts.length > 0, accounts };
-    const shop = await get('SELECT id FROM shops ORDER BY id LIMIT 1');
     if (!shop) return res.json({ data: { product_name: 'MarvelSoftware', company_name: 'MarvelSoftware', preview } });
     const { getSettings } = require('./routes/admin');
     const s = await getSettings(shop.id);

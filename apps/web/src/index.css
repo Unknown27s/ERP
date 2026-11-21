@@ -119,10 +119,9 @@ button.tile { display: block; width: 100%; padding: 0; text-align: left; font: i
   --color-surface: #FFFDF9;
   --color-border: #E8DCCB;   /* warm hairline border */
 
-  /* Admin typography: warm geometric sans for UI + a richer luxury serif for headings.
-     Scoped here so the landing page keeps Cormorant Garamond / Inter. */
-  --font-display: 'Fraunces', Georgia, serif;
-  --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  /* Consistent professional typography across the admin workspace. */
+  --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
   font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
 }

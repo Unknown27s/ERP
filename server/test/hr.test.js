@@ -96,6 +96,39 @@ test('employee, department and designation records', async () => {
   assert.ok(list.body.data.some((row) => row.id === empId && row.department_name.startsWith('Sales')));
 });
 
+test('employee work details are shop/role scoped and task timing is calculated', async () => {
+  const admin = await api('GET', `/hr/employees/${empId}/work?month=${period}`, adminTok);
+  assert.equal(admin.status, 200);
+  assert.deepEqual(admin.body.data.tasks, []);
+  const denied = await api('GET', `/hr/employees/${empId}/work?month=${period}`, billTok);
+  assert.equal(denied.status, 403);
+  const missing = await api('GET', `/hr/employees/missing/work?month=${period}`, adminTok);
+  assert.equal(missing.status, 404);
+  const invalid = await api('GET', `/hr/employees/${empId}/work?month=bad`, adminTok);
+  assert.equal(invalid.status, 400);
+
+  const billing = await get('SELECT user_id FROM profiles WHERE shop_id=? AND email=?', shopId, billEmail);
+  const link = await api('PATCH', `/hr/employees/${empId}`, adminTok, { user_id: billing.user_id });
+  assert.equal(link.status, 200, JSON.stringify(link.body));
+  const { today } = require('../src/services/date');
+  const workDate = today();
+  const started_at = `${workDate}T04:00:00.000Z`; // 09:30 Asia/Kolkata
+  const ended_at = `${workDate}T06:30:00.000Z`; // 12:00 Asia/Kolkata
+  const created = await api('POST', '/employee/tasks', billTok, {
+    work_date: workDate, task_title: 'Complete client review', started_at, ended_at, hours_spent: 20,
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(created.body.data.hours_spent, 2.5);
+  const badTiming = await api('PATCH', `/employee/tasks/${created.body.data.id}`, billTok, {
+    started_at: ended_at, ended_at: started_at,
+  });
+  assert.equal(badTiming.status, 400);
+  const work = await api('GET', `/hr/employees/${empId}/work?month=${workDate.slice(0, 7)}`, adminTok);
+  assert.equal(work.status, 200);
+  assert.equal(work.body.data.tasks[0].task_title, 'Complete client review');
+  assert.equal(work.body.data.summary.task_hours, 2.5);
+});
+
 test('attendance: manual mark and biometric import upsert', async () => {
   const date = `${period}-01`;
   const m = await api('POST', '/hr/attendance', adminTok, {

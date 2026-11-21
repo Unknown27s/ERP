@@ -256,6 +256,39 @@ router.get('/employees/:id', requirePermission('hr.view'), async (req, res) => {
   res.json({ data: { ...row, salary_structures: salary } });
 });
 
+router.get('/employees/:id/work', requirePermission('hr.view'), async (req, res) => {
+  const employee = await get('SELECT id FROM employees WHERE id=? AND shop_id=?', req.params.id, req.user.shop_id);
+  if (!employee) return res.status(404).json({ error: 'not_found' });
+  const month = String(req.query.month || today().slice(0, 7));
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return bad(res, 'month must be YYYY-MM');
+  const prefix = `${month}-%`;
+  const [tasks, sessions, attendance, taskTotals, sessionTotals] = await Promise.all([
+    all(`SELECT id, work_date, task_title, description, tag, status, hours_spent, started_at, ended_at
+      FROM employee_tasks WHERE shop_id=? AND employee_id=? AND work_date LIKE ? AND active=1
+      ORDER BY work_date DESC, created_at DESC LIMIT 100`, req.user.shop_id, employee.id, prefix),
+    all(`SELECT id, work_date, clock_in, clock_out, total_minutes
+      FROM employee_work_sessions WHERE shop_id=? AND employee_id=? AND work_date LIKE ?
+      ORDER BY clock_in DESC LIMIT 100`, req.user.shop_id, employee.id, prefix),
+    all(`SELECT work_date, status, worked_minutes, source FROM attendance
+      WHERE shop_id=? AND employee_id=? AND work_date LIKE ?
+      ORDER BY work_date DESC LIMIT 100`, req.user.shop_id, employee.id, prefix),
+    get(`SELECT COUNT(*) AS task_count, COALESCE(SUM(hours_spent),0) AS task_hours
+      FROM employee_tasks WHERE shop_id=? AND employee_id=? AND work_date LIKE ? AND active=1`,
+    req.user.shop_id, employee.id, prefix),
+    get(`SELECT COALESCE(SUM(total_minutes),0) AS clocked_minutes
+      FROM employee_work_sessions WHERE shop_id=? AND employee_id=? AND work_date LIKE ?`,
+    req.user.shop_id, employee.id, prefix),
+  ]);
+  res.json({ data: {
+    tasks, sessions, attendance,
+    summary: {
+      task_count: Number(taskTotals.task_count),
+      task_hours: Math.round(Number(taskTotals.task_hours) * 100) / 100,
+      clocked_minutes: Number(sessionTotals.clocked_minutes),
+    },
+  } });
+});
+
 router.post('/employees', requirePermission('hr.manage'), async (req, res) => {
   const b = req.body || {};
   const empCode = String(b.emp_code || '').trim();

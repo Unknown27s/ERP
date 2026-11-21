@@ -9,6 +9,8 @@ export type ReportTask = {
   description?: string | null;
   tag: string;
   hours_spent: number;
+  started_at?: string | null;
+  ended_at?: string | null;
   status: string;
   project_or_lead_ref?: string | null;
 };
@@ -141,6 +143,9 @@ export function downloadEmployeeReportPdf(data: EmployeeReportData) {
     t.work_date,
     t.task_title,
     `#${t.tag}`,
+    t.started_at && t.ended_at
+      ? `${new Date(t.started_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}-${new Date(t.ended_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`
+      : '—',
     `${Number(t.hours_spent || 0).toFixed(1)}h`,
     (t.status || 'completed').toUpperCase(),
     t.description || '—',
@@ -152,15 +157,16 @@ export function downloadEmployeeReportPdf(data: EmployeeReportData) {
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
     styles: { fontSize: 7.5, cellPadding: 2 },
     columnStyles: {
-      0: { cellWidth: 22 },
-      1: { cellWidth: 50 },
-      2: { cellWidth: 26 },
-      3: { cellWidth: 16 },
-      4: { cellWidth: 22 },
-      5: { cellWidth: 'auto' },
+      0: { cellWidth: 19 },
+      1: { cellWidth: 39 },
+      2: { cellWidth: 21 },
+      3: { cellWidth: 27 },
+      4: { cellWidth: 13 },
+      5: { cellWidth: 20 },
+      6: { cellWidth: 'auto' },
     },
-    head: [['Date', 'Task Title', 'Tag', 'Hours', 'Status', 'Description / Details']],
-    body: taskRows.length > 0 ? taskRows : [['—', 'No tasks logged for this period', '—', '—', '—', '—']],
+    head: [['Date', 'Task Title', 'Tag', 'Start–End', 'Hours', 'Status', 'Description / Details']],
+    body: taskRows.length > 0 ? taskRows : [['—', 'No tasks logged for this period', '—', '—', '—', '—', '—']],
   });
 
   const filename = `Work_Report_${data.employeeCode || 'EMP'}_${data.periodLabel.replace(/\s+/g, '_')}.pdf`;
@@ -172,6 +178,8 @@ export function downloadTasksCsv(tasks: ReportTask[], filename = 'tasks_complete
     { header: 'Date', value: (t) => t.work_date },
     { header: 'Task Title', value: (t) => t.task_title },
     { header: 'Category Tag', value: (t) => t.tag },
+    { header: 'Started At', value: (t) => t.started_at || '' },
+    { header: 'Ended At', value: (t) => t.ended_at || '' },
     { header: 'Hours Spent', value: (t) => t.hours_spent },
     { header: 'Status', value: (t) => t.status || 'completed' },
     { header: 'Project / Reference', value: (t) => t.project_or_lead_ref },

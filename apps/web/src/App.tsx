@@ -59,6 +59,9 @@ import {
   Search,
   User,
   CheckCircle2,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 const qc = new QueryClient();
@@ -249,6 +252,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   const { user, loading, logout, can: canDo } = useAuth();
   const { brand } = useBranding();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [demoEmail, setDemoEmail] = useState('');
+  const [revealDemoPassword, setRevealDemoPassword] = useState(false);
 
   // Loading skeleton while session credentials resolve
   if (loading) {
@@ -266,6 +271,8 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   if (!user) return <Navigate to="/login" replace />;
 
   const productName = brand.product_name || brand.company_name || 'MarvelSoftware';
+  const demoAccounts = brand.preview?.enabled ? brand.preview.accounts.filter((account) => !!account.password) : [];
+  const demoAccount = demoAccounts.find((account) => account.email === demoEmail) || demoAccounts[0];
   const closeSidebar = () => setSidebarOpen(false);
 
   // Generate 2-letter uppercase initials for profile avatars
@@ -698,6 +705,37 @@ function AdminShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </div>
+
+        {/* Demo credentials are supplied only by an explicitly enabled preview deployment. */}
+        {demoAccount && (
+          <details className="mx-3 mb-3 rounded-xl border border-amber-400/20 bg-amber-400/5 text-xs">
+            <summary className="flex cursor-pointer items-center gap-2 px-3 py-2.5 font-semibold text-amber-100">
+              <KeyRound className="h-4 w-4" />
+              Demo sign-in accounts
+            </summary>
+            <div className="space-y-2 border-t border-amber-400/20 px-3 py-3">
+              <label htmlFor="demo-role" className="block text-[11px] text-slate-300">Choose a role</label>
+              <select id="demo-role" value={demoAccount.email} onChange={(e) => {
+                setDemoEmail(e.target.value);
+                setRevealDemoPassword(false);
+              }} className="w-full rounded-lg border-slate-700 bg-slate-900 text-slate-100 text-xs">
+                {demoAccounts.map((account) => (
+                  <option key={account.email} value={account.email}>{account.role} — {account.name}</option>
+                ))}
+              </select>
+              <div className="break-all text-slate-300">Email: <span className="font-medium text-white">{demoAccount.email}</span></div>
+              <div className="flex items-center justify-between gap-2 text-slate-300">
+                <span>Password: <span className="font-medium text-white">{revealDemoPassword ? demoAccount.password : '••••••••'}</span></span>
+                <button type="button" onClick={() => setRevealDemoPassword((value) => !value)}
+                  aria-label={revealDemoPassword ? 'Hide demo password' : 'Show demo password'}
+                  className="rounded p-1 text-slate-300 hover:text-white">
+                  {revealDemoPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-amber-200/80">Demo environment only. Never enable preview on real staff data.</p>
+            </div>
+          </details>
+        )}
 
         {/* 2.4 User Profile & Sign Out Footer */}
         <div className="p-3 border-t border-slate-800/80 bg-slate-900/40">
