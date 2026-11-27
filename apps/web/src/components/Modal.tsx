@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useId, useRef } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { Search } from 'lucide-react';
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -15,6 +15,10 @@ interface ModalProps {
   zIndex?: number;
   /** Set false to require an explicit action (no overlay/escape close). */
   dismissible?: boolean;
+  /** Prevent closing while a server operation is pending. */
+  pending?: boolean;
+  /** Ask before discarding an edited form. */
+  dirty?: boolean;
   bodyClassName?: string;
   className?: string;
 }
@@ -44,48 +48,44 @@ export default function Modal({
   size = 'lg',
   zIndex = 1000,
   dismissible = true,
+  pending = false,
+  dirty = false,
   bodyClassName,
   className = '',
 }: ModalProps) {
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dismissible) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [dismissible, onClose]);
+  const opener = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const descriptionId = useId();
+  const close = () => {
+    if (pending) return;
+    if (dirty && !window.confirm('Discard your unsaved changes?')) return;
+    onClose();
+  };
 
-  return createPortal(
-    <div
-      className="modal-backdrop"
-      style={{ zIndex }}
-      onMouseDown={(e) => {
-        if (dismissible && e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
+  return (
+    <Dialog.Root open onOpenChange={(open) => { if (!open) close(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="modal-backdrop" style={{ zIndex }}>
+      <Dialog.Content
         className={`modal ${className}`.trim()}
         style={{ maxWidth: MAX_WIDTH[size] }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={typeof title === 'string' ? title : 'Dialog'}
-        onMouseDown={(e) => e.stopPropagation()}
+        aria-describedby={subtitle ? descriptionId : undefined}
+        onEscapeKeyDown={(event) => { if (!dismissible || pending) event.preventDefault(); }}
+        onInteractOutside={(event) => { if (!dismissible || pending) event.preventDefault(); }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (opener.current?.isConnected) opener.current.focus();
+        }}
       >
         {(title || subtitle) && (
           <div className="modal-head">
             <div className="modal-head-copy">
               <div className="modal-title-row">
                 {icon && <span className="modal-icon">{icon}</span>}
-                {title && <h2 className="modal-title">{title}</h2>}
+                <Dialog.Title className={title ? 'modal-title' : 'sr-only'}>{title || 'Dialog'}</Dialog.Title>
               </div>
-              {subtitle && <div className="modal-sub">{subtitle}</div>}
+              {subtitle && <Dialog.Description id={descriptionId} className="modal-sub" asChild><div>{subtitle}</div></Dialog.Description>}
             </div>
-            <button type="button" className="modal-close" onClick={onClose} aria-label="Close dialog" title="Close">
+            <button type="button" className="modal-close" disabled={pending} onClick={close} aria-label="Close dialog" title="Close">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
@@ -93,12 +93,15 @@ export default function Modal({
           </div>
         )}
 
+        {!title && !subtitle && <Dialog.Title className="sr-only">Dialog</Dialog.Title>}
+
         <div className={`modal-body ${bodyClassName || ''}`.trim()}>{children}</div>
 
         {footer && <div className="modal-foot">{footer}</div>}
-      </div>
-    </div>,
-    document.body,
+      </Dialog.Content>
+        </Dialog.Overlay>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

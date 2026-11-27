@@ -20,7 +20,7 @@
  * ==============================================================================
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -53,6 +53,9 @@ import Modal from '../../components/Modal';
 import InvoiceModal from '../../components/InvoiceModal';
 import PageHeader from '../../components/PageHeader';
 import { Badge } from '../../components/ui/Badge';
+import { Button } from '../../components/ui/Button';
+import { Field } from '../../components/OperationalUi';
+import { DataRegion } from '../../components/feedback/DataState';
 import { downloadCsv, fileStamp, type CsvColumn } from '../../lib/export';
 import { downloadInvoicePdf } from '../../lib/invoicePdf';
 import { useAuth } from '../../hooks/auth';
@@ -147,6 +150,9 @@ function CustomerFields({
   onChange: (next: Record<string, any>) => void;
   errors?: Record<string, string>;
 }) {
+  const prefix = useId();
+  const fields = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (errors && Object.keys(errors).length) fields.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus(); }, [errors]);
   const set = (key: string, next: any) => onChange({ ...value, [key]: next });
 
   const field = (
@@ -156,25 +162,22 @@ function CustomerFields({
     const required = (REQUIRED as readonly string[]).includes(key);
     return (
       <div key={key} className={opts.span ? 'sm:col-span-2' : undefined}>
-        <label className="lbl">
-          {FIELD_LABELS[key]}
-          {required ? ' *' : ''}
-        </label>
+        <Field label={FIELD_LABELS[key]} required={required} hint={opts.hint} error={errors?.[key]}>
         <input
+          id={`${prefix}-${key}`}
           type={opts.type || 'text'}
           value={value[key] ?? ''}
           onChange={(e) => set(key, e.target.value)}
           placeholder={opts.placeholder}
           aria-invalid={!!errors?.[key]}
         />
-        {opts.hint && !errors?.[key] && <div className="mt-1 text-[11px] text-slate-500">{opts.hint}</div>}
-        {errors?.[key] && <div className="modal-error">{errors[key]}</div>}
+        </Field>
       </div>
     );
   };
 
   return (
-    <div className="modal-grid">
+    <div ref={fields} className="modal-grid">
       {field('name', { placeholder: 'e.g. Radhika Sethi' })}
       {field('phone', { type: 'tel', placeholder: '10-digit mobile' })}
       {field('email', { type: 'email', placeholder: 'name@example.com' })}
@@ -205,7 +208,14 @@ function NewCustomerModal({
   const [duplicates, setDuplicates] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
 
+  const requestClose = () => {
+    if (saving) return;
+    if (JSON.stringify(form) !== JSON.stringify(EMPTY_FORM) && !window.confirm('Discard your unsaved customer?')) return;
+    onClose();
+  };
+
   const save = async () => {
+    if (saving) return;
     const missing = missingFields(form);
     if (missing.length) {
       setErrors(Object.fromEntries(missing.map((k) => [k, 'Required'])));
@@ -239,13 +249,14 @@ function NewCustomerModal({
       title="New customer"
       subtitle="Register a customer profile. Name, phone and a full postal address are mandatory."
       icon={<UsersRound className="h-5 w-5" />}
-      onClose={onClose}
+      onClose={requestClose}
+      pending={saving}
       size="lg"
       footer={
         <>
           <span className="modal-hint">Marketing consent defaults to opted in.</span>
           <span className="grow" />
-          <button type="button" className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" disabled={saving} onClick={requestClose}>
             Cancel
           </button>
           <button type="button" className="btn" onClick={save} disabled={saving}>
@@ -255,7 +266,7 @@ function NewCustomerModal({
       }
     >
       {message && (
-        <div className="err-box" style={{ marginBottom: 12 }}>
+        <div role="alert" className="err-box" style={{ marginBottom: 12 }}>
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{message}</span>
@@ -322,7 +333,15 @@ function EditCustomerModal({
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const initial = useRef(form);
+  const requestClose = () => {
+    if (saving) return;
+    if (JSON.stringify(form) !== JSON.stringify(initial.current) && !window.confirm('Discard your unsaved customer changes?')) return;
+    onClose();
+  };
+
   const save = async () => {
+    if (saving) return;
     const missing = missingFields(form);
     if (missing.length) {
       setErrors(Object.fromEntries(missing.map((k) => [k, 'Required'])));
@@ -348,13 +367,14 @@ function EditCustomerModal({
       title={`Edit ${customer.customer_code}`}
       subtitle={`${customer.name} · the mandatory fields must stay complete.`}
       icon={<UserRound className="h-5 w-5" />}
-      onClose={onClose}
+      onClose={requestClose}
+      pending={saving}
       size="lg"
       zIndex={1100}
       footer={
         <>
           <span className="grow" />
-          <button type="button" className="btn ghost" onClick={onClose}>
+          <button type="button" className="btn ghost" disabled={saving} onClick={requestClose}>
             Cancel
           </button>
           <button type="button" className="btn" onClick={save} disabled={saving}>
@@ -364,7 +384,7 @@ function EditCustomerModal({
       }
     >
       {message && (
-        <div className="err-box" style={{ marginBottom: 12 }}>
+        <div role="alert" className="err-box" style={{ marginBottom: 12 }}>
           {message}
         </div>
       )}
@@ -800,12 +820,12 @@ function SortHead({
   const active = sort === column;
   const Icon = !active ? ChevronsUpDown : dir === 'asc' ? ChevronUp : ChevronDown;
   return (
-    <th className="whitespace-nowrap px-3 py-2.5">
+    <th scope="col" aria-sort={active ? dir === 'asc' ? 'ascending' : 'descending' : undefined} className={cn('whitespace-nowrap px-3 py-2.5', align === 'right' && 'text-right')}>
       <button
         type="button"
         onClick={() => onSort(column)}
         className={cn(
-          'inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider transition-colors',
+          'inline-flex min-h-8 items-center gap-1 text-xs font-semibold transition-colors',
           align === 'right' && 'justify-end',
           active ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800',
         )}
@@ -842,6 +862,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   const extra = useMemo(() => {
     const parts: string[] = [];
@@ -906,15 +927,17 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
 
   const exportCsv = async () => {
     try {
+      setExportError('');
       setExporting(true);
       // Exports every match, not just the visible page. 5000 is a guard rail,
       // not a paging limit: a single company will not exceed it.
       const res = await api.get(
         `/customers?q=${encodeURIComponent(applied.q)}&sort=${sort}&dir=${dir}&page=1&limit=5000${extra}`,
       );
+      if (Number(res.total || 0) > (res.data || []).length) throw new Error('The matching list exceeds the export limit. Narrow the filters and try again; no partial file was downloaded.');
       downloadCsv(`customers-${fileStamp()}`, EXPORT_COLUMNS, res.data || []);
     } catch (e: any) {
-      alert(`Export failed: ${e.message}`);
+      setExportError(`Export failed: ${e.message}`);
     } finally {
       setExporting(false);
     }
@@ -923,12 +946,12 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
   const stats = report.data?.data;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
+    <div className="erp-page">
       <PageHeader
         eyebrow="CRM &amp; Sales"
         meta={total > 0 ? `${total} matching ${total === 1 ? 'profile' : 'profiles'}` : 'Customer master'}
         title="Customers"
-        description="Every registered customer, with spend, purchase recency and marketing consent. Records are never merged automatically — a shared phone resolves to an explicit choice."
+        description="Manage customer contacts, review purchase history and keep consent up to date."
         actions={
           <>
             <button type="button" className="btn ghost" onClick={() => query.refetch()} disabled={query.isFetching}>
@@ -937,7 +960,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
                 Refresh
               </span>
             </button>
-            <button type="button" className="btn ghost" onClick={exportCsv} disabled={exporting || !rows.length}>
+            <button type="button" className="btn ghost" title="Export matching customers, up to 5,000 records" onClick={exportCsv} disabled={exporting || !rows.length}>
               <span className="inline-flex items-center gap-1.5">
                 <Download className="h-3.5 w-3.5" />
                 {exporting ? 'Exporting…' : 'Export CSV'}
@@ -947,7 +970,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
               <button type="button" className="btn" onClick={() => setNewOpen(true)}>
                 <span className="inline-flex items-center gap-1.5">
                   <Plus className="h-4 w-4" />
-                  New customer
+                  Add customer
                 </span>
               </button>
             )}
@@ -955,10 +978,12 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
         }
       />
 
+      {exportError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{exportError}</p>}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi
           label="Total customers"
-          value={stats ? stats.total : total}
+          value={stats ? stats.total : query.isLoading || query.isError ? '—' : total}
           hint={stats ? 'All profiles on this company record' : 'Matching the current filters'}
           icon={UsersRound}
           tone="brand"
@@ -966,20 +991,20 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
         <Kpi
           label="Repeat buyers"
           value={stats ? stats.repeat_customers : '—'}
-          hint={stats ? `${(Number(stats.repeat_rate) * 100).toFixed(0)}% of the base bought twice or more` : 'Needs reports.view'}
+          hint={stats ? `${(Number(stats.repeat_rate) * 100).toFixed(0)}% bought twice or more` : can('reports.view') ? 'Report not available' : 'Report access required'}
           icon={Repeat}
           tone="violet"
         />
         <Kpi
           label="New this month"
           value={stats ? stats.new_customers : '—'}
-          hint={stats ? 'Profiles created in the last 30 days' : 'Needs reports.view'}
+          hint={stats ? 'Profiles in the current report period' : can('reports.view') ? 'Report not available' : 'Report access required'}
           icon={Plus}
           tone="emerald"
         />
         <Kpi
           label="Opted in"
-          value={rows.filter((r) => r.marketing_consent).length}
+          value={query.isLoading || query.isError ? '—' : rows.filter((r) => r.marketing_consent).length}
           hint={rows.length ? `Of ${rows.length} on this page` : 'No rows on this page'}
           icon={ShieldCheck}
           tone="amber"
@@ -990,9 +1015,10 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
 
       <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-[240px] flex-1">
-            <label className="lbl">Search</label>
+          <div className="min-w-0 basis-60 flex-1">
+            <label className="lbl" htmlFor="customer-search">Search customers</label>
             <input
+              id="customer-search"
               placeholder="Name / phone / code / email"
               value={draft.q}
               onChange={(e) => setDraft({ ...draft, q: e.target.value })}
@@ -1005,8 +1031,9 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
             />
           </div>
           <div className="w-[130px]">
-            <label className="lbl">Min spend ₹</label>
+            <label className="lbl" htmlFor="customer-min-spend">Min spend ₹</label>
             <input
+              id="customer-min-spend"
               inputMode="numeric"
               value={draft.minSpent}
               onChange={(e) => setDraft({ ...draft, minSpent: e.target.value })}
@@ -1019,8 +1046,9 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
             />
           </div>
           <div className="w-[130px]">
-            <label className="lbl">Max spend ₹</label>
+            <label className="lbl" htmlFor="customer-max-spend">Max spend ₹</label>
             <input
+              id="customer-max-spend"
               inputMode="numeric"
               value={draft.maxSpent}
               onChange={(e) => setDraft({ ...draft, maxSpent: e.target.value })}
@@ -1033,8 +1061,8 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
             />
           </div>
           <div className="w-[240px]">
-            <label className="lbl">Last purchase</label>
-            <select value={draft.recency} onChange={(e) => setDraft({ ...draft, recency: e.target.value })}>
+            <label className="lbl" htmlFor="customer-recency">Last purchase</label>
+            <select id="customer-recency" value={draft.recency} onChange={(e) => setDraft({ ...draft, recency: e.target.value })}>
               <option value="">Any time</option>
               <option value="last:30">Bought within 30 days</option>
               <option value="last:60">Bought within 60 days</option>
@@ -1049,16 +1077,18 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
           {draft.recency === 'custom' && (
             <>
               <div>
-                <label className="lbl">From</label>
+                <label className="lbl" htmlFor="customer-date-from">From</label>
                 <input
+                  id="customer-date-from"
                   type="date"
                   value={draft.lastFrom}
                   onChange={(e) => setDraft({ ...draft, lastFrom: e.target.value })}
                 />
               </div>
               <div>
-                <label className="lbl">To</label>
+                <label className="lbl" htmlFor="customer-date-to">To</label>
                 <input
+                  id="customer-date-to"
                   type="date"
                   value={draft.lastTo}
                   onChange={(e) => setDraft({ ...draft, lastTo: e.target.value })}
@@ -1084,31 +1114,11 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
       </div>
 
       <div className="rounded-xl border border-slate-200/80 bg-white shadow-sm">
-        {query.isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading customers…
-          </div>
-        ) : query.isError ? (
-          <div className="m-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            Could not load customers. {(query.error as any)?.message || 'Check the API connection.'}
-          </div>
-        ) : !rows.length ? (
-          <div className="py-16 text-center">
-            <UsersRound className="mx-auto h-8 w-8 text-slate-300" />
-            <p className="mt-2 text-sm font-medium text-slate-700">
-              {hasFilters ? 'No customers match these filters.' : 'No customers yet.'}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {hasFilters
-                ? 'Widen the spend band or clear the recency filter.'
-                : 'Register the first customer to start tracking purchases and consent.'}
-            </p>
-          </div>
-        ) : (
+        <DataRegion query={query} empty={!rows.length} emptyTitle={hasFilters ? 'No matching customers' : 'No customers yet'} emptyDescription={hasFilters ? 'Try a different search or clear your filters.' : 'Add your first customer to start keeping contact and purchase records.'} emptyAction={hasFilters ? <Button variant="outline" onClick={clearAll}>Clear filters</Button> : can('crm.manage') ? <Button onClick={() => setNewOpen(true)}>Add customer</Button> : undefined}>
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div role="region" aria-label="Customer register" tabIndex={0} className="overflow-x-auto">
+              <table className="erp-register">
+                <caption className="sr-only">Customers matching the current search and filters</caption>
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50/80 text-left">
                     <th className="whitespace-nowrap px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
@@ -1155,13 +1165,12 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
                   {rows.map((customer, index) => (
                     <tr
                       key={customer.id}
-                      className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-brand-50/40"
-                      onClick={() => setSelectedId(customer.id)}
+                      className="border-b border-slate-100 transition-colors last:border-0 hover:bg-brand-50/40"
                     >
                       <td className="px-3 py-2.5 text-xs text-slate-400">{(page - 1) * limit + index + 1}</td>
                       <td className="px-3 py-2.5 text-xs font-medium text-slate-500">{customer.customer_code}</td>
                       <td className="px-3 py-2.5">
-                        <div className="font-semibold text-slate-900">{customer.name}</div>
+                        <button type="button" className="text-left font-semibold text-ink hover:text-brand-700 hover:underline" onClick={() => setSelectedId(customer.id)}>{customer.name}</button>
                         <div className="text-[11px] text-slate-500">{addressOf(customer)}</div>
                       </td>
                       <td className="px-3 py-2.5">
@@ -1191,6 +1200,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
                       <td className="px-3 py-2.5 text-right">
                         <button
                           type="button"
+                          aria-label={`View ${customer.name}`}
                           className="btn ghost xs"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1220,7 +1230,7 @@ function CustomerList({ startNew, onNewClosed }: { startNew: boolean; onNewClose
               />
             </div>
           </>
-        )}
+        </DataRegion>
       </div>
 
       {newOpen && (

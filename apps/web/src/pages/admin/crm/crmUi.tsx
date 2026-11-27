@@ -189,13 +189,13 @@ export function Kpi({
   return (
     <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+        <span className="text-xs font-medium text-ink-secondary">{label}</span>
         <div className={cn('p-2 rounded-lg', KPI_TONES[tone] || KPI_TONES.brand)}>
           <Icon className="w-4 h-4" />
         </div>
       </div>
       <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
-      {hint && <p className="mt-1 text-[11px] text-slate-500">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-ink-muted">{hint}</p>}
     </div>
   );
 }
@@ -268,6 +268,7 @@ export function Pagination({
       <div className="flex flex-wrap items-center gap-2 text-slate-500">
         <span>Show</span>
         <select
+          aria-label={`${noun} per page`}
           value={limit}
           onChange={(e) => onLimit(Number(e.target.value))}
           style={{ width: 'auto', padding: '6px 10px' }}
@@ -306,6 +307,7 @@ export function Pagination({
               key={n}
               onClick={() => onPage(n)}
               className={n === page ? 'btn' : 'btn ghost'}
+              aria-current={n === page ? 'page' : undefined}
               style={{ padding: '6px 11px', fontSize: 13, minWidth: 34 }}
             >
               {n}

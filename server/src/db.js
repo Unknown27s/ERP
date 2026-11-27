@@ -104,7 +104,7 @@ async function withTransaction(fn) {
 }
 
 let _ready = null;
-const MIGRATIONS = ['0001_init', '0002_roles_staff', '0003_offers_created_at', '0004_email_settings', '0005_occasions_festivals', '0006_campaign_schedule', '0007_hr', '0008_erp_foundation', '0009_holiday_soft_delete', '0010_crm_pipeline', '0011_employee_portal_and_workflows', '0012_security_hardening', '0013_employee_profile_links', '0014_employee_task_times', '0015_generic_erp_workflows'];
+const MIGRATIONS = ['0001_init', '0002_roles_staff', '0003_offers_created_at', '0004_email_settings', '0005_occasions_festivals', '0006_campaign_schedule', '0007_hr', '0008_erp_foundation', '0009_holiday_soft_delete', '0010_crm_pipeline', '0011_employee_portal_and_workflows', '0012_security_hardening', '0013_employee_profile_links', '0014_employee_task_times', '0015_generic_erp_workflows', '0016_task_assignments'];
 const migFile = (m) => fs.readFileSync(
   path.join(__dirname, '..', '..', 'supabase', 'migrations', `${m}_pg.sql`), 'utf8');
 

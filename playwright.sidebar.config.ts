@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/ui',
-  testMatch: 'sidebar.spec.ts',
+  testMatch: '*.spec.ts',
   fullyParallel: true,
   outputDir: '/tmp/opencode/erp-sidebar-tests',
   use: {

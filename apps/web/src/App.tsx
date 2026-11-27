@@ -23,6 +23,7 @@ import Inventory from './pages/admin/Inventory';
 import Sales from './pages/admin/Sales';
 import Finance from './pages/admin/Finance';
 import Email from './pages/admin/Email';
+import Tasks from './pages/Tasks';
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
 function Guard({ permissions, children }: { permissions?: string[]; children: React.ReactNode }) {
@@ -35,7 +36,7 @@ function Screen({ permissions, children }: { permissions?: string[]; children: R
 }
 function Home() {
   const { user } = useAuth();
-  return user?.role_name === 'Employee' ? <Navigate to="/employee" replace /> : <Dashboard />;
+  return user?.role_name === 'Employee' ? <Navigate to="/employee/tasks" replace /> : <Dashboard />;
 }
 export default function App() {
   return <QueryClientProvider client={qc}><ToastProvider><BrandingProvider><AuthProvider><BrowserRouter><Routes>
@@ -43,7 +44,10 @@ export default function App() {
     <Route path="/login" element={<Login />} />
     <Route path="/admin" element={<Screen><Home /></Screen>} />
     <Route path="/employee/profile" element={<Navigate to="/employee" replace />} />
-    {['profile', 'tasks', 'leaves', 'payslips', 'reports'].map((tab) => <Route key={tab} path={tab === 'profile' ? '/employee' : `/employee/${tab}`} element={<Screen><EmployeePortal initialTab={tab} /></Screen>} />)}
+    <Route path="/employee/tasks" element={<Screen><Tasks key="mine" /></Screen>} />
+    <Route path="/admin/tasks" element={<Screen permissions={['hr.manage']}><Tasks key="team" scope="team" /></Screen>} />
+    <Route path="/employee/work-logs" element={<Screen><EmployeePortal initialTab="tasks" /></Screen>} />
+    {['profile', 'leaves', 'payslips', 'reports'].map((tab) => <Route key={tab} path={tab === 'profile' ? '/employee' : `/employee/${tab}`} element={<Screen><EmployeePortal initialTab={tab} /></Screen>} />)}
     {(['users', 'roles', 'departments', 'designations'] as const).map((tab) => <Route key={tab} path={tab === 'users' ? '/admin/staff' : `/admin/staff/${tab}`} element={<Screen permissions={['staff.view']}><Staff tab={tab} /></Screen>} />)}
     <Route path="/admin/crm" element={<Navigate to="/admin/crm/leads" replace />} />
     <Route path="/admin/crm/leads" element={<Screen permissions={['crm.view']}><Leads /></Screen>} />

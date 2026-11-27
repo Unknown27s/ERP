@@ -435,7 +435,7 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
       <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto pb-px">
         {[
           { id: 'profile', label: 'My Profile', icon: User },
-          { id: 'tasks', label: 'Completed Tasks', icon: CheckCircle2 },
+          { id: 'tasks', label: 'Work log', icon: CheckCircle2 },
           { id: 'leaves', label: 'Leaves & Time Off', icon: CalendarRange },
           { id: 'payslips', label: 'Payslips & Salary', icon: Banknote },
           { id: 'reports', label: 'Work Reports & Charts', icon: BarChart3 },
@@ -445,7 +445,7 @@ export default function EmployeePortal({ initialTab = 'profile' }: { initialTab?
           return (
             <button
               key={tab.id}
-              onClick={() => navigate(tab.id === 'profile' ? '/employee' : `/employee/${tab.id}`)}
+              onClick={() => navigate(tab.id === 'profile' ? '/employee' : tab.id === 'tasks' ? '/employee/work-logs' : `/employee/${tab.id}`)}
               className={`flex items-center gap-2 px-4 py-2.5 border-b-2 font-medium text-xs whitespace-nowrap transition-colors ${
                 isActive
                   ? 'border-brand-600 text-brand-600 font-semibold'

@@ -81,28 +81,23 @@ test('employee navigation does not expose admin modules', async ({ page }) => {
   await expect(ui.navigation.getByRole('link', { name: 'Overview' })).toHaveCount(0);
 });
 
-test('production login preserves all four demo role shortcuts', async ({ page }) => {
+test('login never invents demo people when the server sends none', async ({ page }) => {
   await page.route('**/api/config', (route) => route.fulfill({ json: { data: {} } }));
   await page.goto('/login');
-  for (const [role, email, password] of [
-    ['Admin Full access', 'admin@marvelsoftware.local', 'Admin@123'],
-    ['HR People & Leave', 'hr@marvelsoftware.local', 'Hr@12345'],
-    ['Finance Books & Payroll', 'finance@marvelsoftware.local', 'Finance@123'],
-    ['Employee Self-service', 'employee@marvelsoftware.local', 'Employee@123'],
-  ]) {
-    await page.getByRole('button', { name: role, exact: true }).click();
-    await expect(page.getByLabel('Work Email')).toHaveValue(email);
-    await expect(page.getByLabel('Password', { exact: true })).toHaveValue(password);
-  }
-  await expect(page.getByText('Shared demo accounts.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Choose a demo person' })).toHaveCount(0);
+  await expect(page.getByLabel('Work Email')).toHaveValue('');
+  await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
+  await expect(page.getByText('Sample accounts for evaluation.', { exact: false })).toHaveCount(0);
 });
 
-test('production login preserves the server-configured preview roster', async ({ page }) => {
+test('login renders the server-configured demo roster with credentials', async ({ page }) => {
   await page.route('**/api/config', (route) => route.fulfill({ json: { data: { preview: {
     enabled: true, accounts: [{ name: 'Preview Reviewer', role: 'Manager', email: 'reviewer@example.test', password: 'PreviewTest123!' }],
   } } } }));
   await page.goto('/login');
-  await page.getByRole('button', { name: 'Preview Reviewer Manager' }).click();
+  const card = page.getByRole('button', { name: 'Preview Reviewer Manager' });
+  await expect(card).toContainText('PreviewTest123!');
+  await card.click();
   await expect(page.getByLabel('Work Email')).toHaveValue('reviewer@example.test');
   await expect(page.getByLabel('Password', { exact: true })).toHaveValue('PreviewTest123!');
 });

@@ -1,13 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 :root {
   /* ERP palette - specification "Status colors".
      Legacy variable names are kept as aliases so existing components inherit
      the new brand without a risky class-by-class rewrite. */
-  --color-primary: #2563EB;          /* Primary - buttons, links, active menu */
-  --color-primary-hover: #1D4ED8;    /* Primary hover */
+  --color-primary: rgb(var(--erp-primary));
+  --color-primary-hover: rgb(var(--erp-primary-hover));
   --color-sidebar: #0F172A;          /* Sidebar background */
   --color-sidebar-text: #CBD5E1;     /* Sidebar text */
   --color-bg: #F8FAFC;               /* Page background */
@@ -75,7 +71,7 @@ button { font-family: inherit; }
 .btn.ghost:hover { background: rgba(37, 99, 235,.14); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .card { background: var(--color-card); border: 1px solid var(--color-border); border-radius: 12px; padding: 18px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06); }
-.grid { display: grid; gap: 16px; }
+.legacy-grid, .grid.kpi, .grid.catalog { display: grid; gap: 16px; }
 .grid.kpi { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .kpi-card { position: relative; display: flex; flex-direction: column; gap: 10px; overflow: hidden; transition: transform var(--motion-fast), box-shadow var(--motion-fast); }
 .kpi-card::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; border-radius: 12px 0 0 12px; background: var(--tint, var(--color-gold)); }
@@ -89,8 +85,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .tbl th, .tbl td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
 .tbl th { color: var(--color-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .4px; }
 .tbl tr:hover td { background: #F7F8FA; }
-input, select, textarea { border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 12px; font: inherit; width: 100%; background: #fff; }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--color-gold); outline-offset: 1px; }
 label.lbl { font-size: 13px; font-weight: 600; color: var(--color-muted); display: block; margin: 10px 0 4px; }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
 .filters > * { min-width: 160px; flex: 1; }
@@ -886,7 +880,7 @@ button:disabled,
   color: #6B5B49;
   transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast), transform var(--motion-fast);
 }
-.modal-close:hover { background: #FBE9E7; border-color: rgba(180, 35, 24, .35); color: var(--color-error); transform: rotate(90deg); }
+.modal-close:hover { background: #F1F5F9; border-color: #94A3B8; color: #0F172A; }
 
 .modal-body {
   flex: 1;

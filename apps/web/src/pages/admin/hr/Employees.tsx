@@ -27,6 +27,7 @@ import {
   Phone,
   Clock3,
   Eye,
+  Pencil,
 } from 'lucide-react';
 import HrShell, { KPI_TINTS, useHrOverview } from './HrShell';
 import { Button } from '../../../components/ui/Button';
@@ -66,6 +67,8 @@ type Employee = {
   bank_ifsc: string | null;
   user_id: string | null;
   linked_user_email?: string | null;
+  manager_name?: string | null;
+  address?: string | null;
 };
 
 type LinkableUser = {
@@ -79,6 +82,15 @@ type LinkableUser = {
 };
 
 type Lookup = { id: string; name: string; grade?: string | null };
+
+function ProfileSection({ title, fields }: { title: string; fields: Array<[string, string | null | undefined]> }) {
+  return <section className="rounded-lg border border-line bg-white p-5">
+    <h3 className="mb-4 text-sm font-semibold text-ink">{title}</h3>
+    <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+      {fields.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-ink-muted">{label}</dt><dd className="mt-1 break-words text-sm font-medium text-ink">{value || 'Not provided'}</dd></div>)}
+    </dl>
+  </section>;
+}
 
 const EMPTY_FORM = {
   emp_code: '',
@@ -192,6 +204,7 @@ export default function HREmployees() {
         toast.success('Employee created', `${form.full_name} was added to the directory.`);
       }
       await refresh();
+      if (selectedId) await detail.refetch();
       reset();
       setShowForm(false);
     } catch (err: any) {
@@ -385,38 +398,43 @@ export default function HREmployees() {
 
       {selectedId && (
         <Dialog open onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
-          <DialogContent size="lg">
-            <DialogHeader>
-              <DialogTitle>{detail.data?.data?.full_name || 'Employee details'}</DialogTitle>
-              <DialogDescription>Profile and work records for this employee only.</DialogDescription>
-            </DialogHeader>
-            <div className="max-h-[65vh] overflow-y-auto space-y-5 text-sm pr-1">
-              {detail.isLoading ? <p>Loading employee…</p> : detail.isError ? (
-                <p className="text-rose-600">Could not load employee details.</p>
-              ) : detail.data?.data && (
-                <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-4">
-                  {([
-                    ['Code', detail.data.data.emp_code],
-                    ['Status', detail.data.data.status],
-                    ['Department', detail.data.data.department_name],
-                    ['Designation', detail.data.data.designation_name],
-                    ['Email', detail.data.data.linked_user_email || detail.data.data.email],
-                    ['Phone', detail.data.data.phone],
-                    ['Joined', detail.data.data.joining_date],
-                    ['Manager', detail.data.data.manager_name],
-                    ['Employment type', detail.data.data.employment_type],
-                    ['Branch', detail.data.data.branch_name],
-                    ['Address', detail.data.data.address],
-                    ['PAN', detail.data.data.pan],
-                    ['Bank account', detail.data.data.bank_account],
-                    ['IFSC', detail.data.data.bank_ifsc],
-                  ] as [string, string | null][]).map(([label, value]) => (
-                    value ? <div key={label}><div className="text-xs text-slate-500">{label}</div>
-                      <div className="font-medium text-slate-800 break-words">{value || '—'}</div></div>
-                    : null
-                  ))}
+          <DialogContent size="xl" className="gap-0 overflow-hidden rounded-lg p-0 sm:max-w-6xl">
+            <DialogHeader className="border-b border-line bg-slate-50 px-5 py-6 pr-14 sm:px-8">
+              <div className="flex items-center gap-4">
+                <div aria-hidden="true" className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-brand-100 bg-brand-50 text-xl font-semibold text-brand-700">{detail.data?.data?.full_name?.split(/\s+/).filter(Boolean).slice(0, 2).map((part: string) => part[0]).join('') || <UserCheck size={26} />}</div>
+                <div className="min-w-0">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-brand-700">Employee profile</p>
+                  <DialogTitle className="break-words text-xl leading-tight sm:text-2xl">{detail.data?.data?.full_name || 'Employee details'}</DialogTitle>
+                  <DialogDescription className="mt-2 text-sm">{[detail.data?.data?.designation_name, detail.data?.data?.department_name].filter(Boolean).join(' · ') || 'Profile and work records for this employee.'}</DialogDescription>
                 </div>
+              </div>
+              {detail.data?.data && <div className="flex flex-wrap items-center gap-2 pt-3"><span className="rounded border border-line bg-white px-2.5 py-1 font-mono text-xs text-ink-secondary">{detail.data.data.emp_code}</span><Badge variant={detail.data.data.status === 'active' ? 'success' : detail.data.data.status === 'notice' ? 'warning' : 'secondary'}>{STATUS_FILTERS.find((entry) => entry.key === detail.data.data.status)?.label || detail.data.data.status}</Badge></div>}
+            </DialogHeader>
+            <div className="min-h-0 max-h-[60dvh] overflow-y-auto bg-canvas p-5 text-sm sm:p-8">
+              <div className="grid items-start gap-6 lg:grid-cols-[1fr_1fr]">
+              <div className="space-y-4">
+              {detail.isLoading ? <p>Loading employee…</p> : detail.isError ? (
+                <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-rose-700">Could not load employee details. <Button variant="outline" size="sm" onClick={() => void detail.refetch()}>Retry profile</Button></div>
+              ) : detail.data?.data && (
+                <>
+                  <ProfileSection title="Contact details" fields={[
+                    ['Email', detail.data.data.email], ['Phone', detail.data.data.phone],
+                    ['Login account', detail.data.data.linked_user_email], ['Address', detail.data.data.address],
+                  ]} />
+                  <ProfileSection title="Employment details" fields={[
+                    ['Department', detail.data.data.department_name], ['Designation', detail.data.data.designation_name],
+                    ['Joined', detail.data.data.joining_date], ['Manager', detail.data.data.manager_name],
+                    ['Employment type', EMPLOYMENT_TYPES.find(([key]) => key === detail.data.data.employment_type)?.[1] || detail.data.data.employment_type],
+                    ['Branch', detail.data.data.branch_name],
+                    ...(detail.data.data.exit_date ? [['Exit date', detail.data.data.exit_date] as [string, string]] : []),
+                  ]} />
+                  {[detail.data.data.pan, detail.data.data.bank_account, detail.data.data.bank_ifsc].some(Boolean) && <ProfileSection title="Payroll & statutory details" fields={[
+                    ['PAN', detail.data.data.pan], ['Bank account', detail.data.data.bank_account], ['IFSC', detail.data.data.bank_ifsc],
+                  ]} />}
+                </>
               )}
+              </div>
+              <section aria-label="Employee work activity" className="space-y-5 rounded-lg border border-line bg-white p-5">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="font-semibold text-slate-900">Work activity</h3>
                 <input aria-label="Work month" type="month" value={workMonth}
@@ -427,7 +445,7 @@ export default function HREmployees() {
               ) : (
                 <>
                   <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge variant="info">{work.data?.data?.summary?.task_count || 0} tasks</Badge>
+                    <Badge variant="info">{work.data?.data?.summary?.task_count || 0} work logs</Badge>
                     <Badge variant="secondary">{work.data?.data?.summary?.task_hours || 0} task hours</Badge>
                     <Badge variant="secondary">{((work.data?.data?.summary?.clocked_minutes || 0) / 60).toFixed(1)} clocked hours</Badge>
                   </div>
@@ -446,7 +464,7 @@ export default function HREmployees() {
                         </p>
                       </div>
                     ))}
-                    {!work.data?.data?.tasks?.length && <p className="text-slate-500">No tasks this month.</p>}
+                    {!work.data?.data?.tasks?.length && <p className="rounded-lg bg-canvas p-4 text-slate-500">No work logs this month.</p>}
                   </div>
                   <h4 className="flex items-center gap-2 font-semibold"><Clock3 className="w-4 h-4" /> Work sessions</h4>
                   {(work.data?.data?.sessions || []).map((session: any) => (
@@ -456,13 +474,26 @@ export default function HREmployees() {
                       {session.clock_out ? ` (${session.total_minutes} min)` : ''}
                     </p>
                   ))}
-                  <h4 className="font-semibold">Attendance</h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(work.data?.data?.attendance || []).map((day: any) => (
-                      <Badge key={day.work_date} variant="secondary">{day.work_date}: {day.status}</Badge>
-                    ))}
-                    {!work.data?.data?.attendance?.length && <span className="text-xs text-slate-500">No attendance recorded.</span>}
-                  </div>
+                  <section aria-label="Employee attendance">
+                    <div className="mb-3 flex items-center justify-between gap-2"><h4 className="font-semibold">Attendance</h4><span className="text-xs text-ink-muted">{work.data?.data?.attendance?.length || 0} recorded days</span></div>
+                    {work.data?.data?.attendance?.length ? <div role="region" aria-label="Scrollable attendance records" tabIndex={0} className="max-h-72 overflow-auto rounded-lg border border-line">
+                      <table className="w-full text-left text-xs">
+                        <caption className="sr-only">Employee attendance for {workMonth}</caption>
+                        <thead className="sticky top-0 bg-slate-50 text-ink-secondary"><tr>
+                          <th scope="col" className="whitespace-nowrap px-3 py-3 font-semibold">Date</th>
+                          <th scope="col" className="px-3 py-3 font-semibold">Status</th>
+                          <th scope="col" className="whitespace-nowrap px-3 py-3 text-right font-semibold">Worked</th>
+                          <th scope="col" className="px-3 py-3 font-semibold">Source</th>
+                        </tr></thead>
+                        <tbody className="divide-y divide-slate-100">{work.data.data.attendance.map((day: { work_date: string; status: string; worked_minutes: number | null; source: string | null }) => <tr key={day.work_date} className="hover:bg-slate-50">
+                          <td className="whitespace-nowrap px-3 py-3 tabular-nums">{day.work_date}</td>
+                          <td className="px-3 py-3"><Badge variant={day.status === 'present' ? 'success' : day.status === 'absent' ? 'destructive' : day.status === 'half_day' ? 'warning' : 'secondary'}><span className="whitespace-nowrap capitalize">{day.status.replace(/_/g, ' ')}</span></Badge></td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{day.worked_minutes == null ? '—' : `${Math.floor(Number(day.worked_minutes) / 60)}h ${Number(day.worked_minutes) % 60}m`}</td>
+                          <td className="px-3 py-3 capitalize text-ink-muted">{day.source?.replace(/_/g, ' ') || '—'}</td>
+                        </tr>)}</tbody>
+                      </table>
+                    </div> : <p className="rounded-lg bg-canvas p-4 text-xs text-slate-500">No attendance recorded for this month.</p>}
+                  </section>
                   {can('payroll.view') && !!detail.data?.data?.salary_structures?.length && (
                     <div className="border-t pt-3">
                       <h4 className="font-semibold">Salary structures</h4>
@@ -476,7 +507,13 @@ export default function HREmployees() {
                   )}
                 </>
               )}
+              </section>
+              </div>
             </div>
+            <DialogFooter className="m-0 gap-2 border-t border-line bg-white px-5 py-4 sm:px-8">
+              <Button variant="outline" onClick={() => setSelectedId(null)}>Close profile</Button>
+              {manage && detail.data?.data && !detail.isError && <Button onClick={() => startEdit(detail.data.data)}><Pencil size={15} aria-hidden="true" />Edit employee</Button>}
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

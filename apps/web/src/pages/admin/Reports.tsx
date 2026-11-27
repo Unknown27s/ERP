@@ -54,6 +54,8 @@ import PageHeader from '../../components/PageHeader';
 import { Badge } from '../../components/ui/Badge';
 import { downloadCsv, fileStamp, type CsvColumn } from '../../lib/export';
 import { Kpi } from './crm/crmUi';
+import { DataRegion, EmptyState } from '../../components/feedback/DataState';
+import { useBranding } from '../../hooks/branding';
 
 /* ── Range control ─────────────────────────────────────────────────────────── */
 
@@ -63,7 +65,7 @@ const PRESETS = [
   { value: 'month', label: 'Last 30 days' },
   { value: '3m', label: 'Last 90 days' },
   { value: '6m', label: 'Last 180 days' },
-  { value: '1y', label: 'Last 12 months' },
+  { value: '1y', label: 'Last 365 days' },
   { value: 'custom', label: 'Custom range…' },
 ] as const;
 
@@ -85,6 +87,13 @@ const shortDay = (iso: string) => {
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 };
 
+const longDay = (iso: string) => {
+  if (!iso) return '';
+  const date = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 /* ── Small presentational helpers ──────────────────────────────────────────── */
 
 function ChartCard({
@@ -104,18 +113,14 @@ function ChartCard({
     <section className="rounded-xl border border-slate-200/80 bg-white shadow-sm">
       <header className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 p-5">
         <div>
-          <h2 className="text-sm font-bold text-slate-900">{title}</h2>
-          {description && <p className="mt-0.5 text-xs text-slate-500">{description}</p>}
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
+          {description && <p className="mt-1 text-sm text-ink-muted">{description}</p>}
         </div>
         {action}
       </header>
       <div className="p-5">
         {empty ? (
-          <div className="flex h-[240px] flex-col items-center justify-center gap-2 text-center">
-            <BarChart3 className="h-7 w-7 text-slate-300" />
-            <p className="text-sm font-medium text-slate-600">Nothing to plot for this range.</p>
-            <p className="text-xs text-slate-500">Try a wider date range.</p>
-          </div>
+          <EmptyState title="No data for this period" description="Try another date range. No sample or estimated figures are included." />
         ) : (
           children
         )}
@@ -128,10 +133,12 @@ function DataTable({
   headers,
   children,
   empty,
+  label = 'Report data',
 }: {
   headers: React.ReactNode;
   children: React.ReactNode;
   empty: boolean;
+  label?: string;
 }) {
   if (empty) {
     return (
@@ -142,10 +149,11 @@ function DataTable({
     );
   }
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200">
-      <table className="w-full text-sm">
+    <div role="region" aria-label={label} tabIndex={0} className="overflow-x-auto rounded-lg border border-slate-200">
+      <table className="erp-register">
+        <caption className="sr-only">{label}</caption>
         <thead>
-          <tr className="border-b border-slate-200 bg-slate-50/80 text-left text-[11px] uppercase tracking-wider text-slate-500">
+          <tr className="border-b border-slate-200 bg-slate-50/80 text-left text-xs text-slate-600">
             {headers}
           </tr>
         </thead>
@@ -159,14 +167,15 @@ function DataTable({
 
 type Tab = 'sales' | 'products' | 'inventory' | 'customers';
 
-const TABS: Array<{ key: Tab; label: string; icon: typeof TrendingUp }> = [
-  { key: 'sales', label: 'Sales', icon: TrendingUp },
-  { key: 'products', label: 'Products', icon: ReceiptText },
-  { key: 'inventory', label: 'Inventory', icon: Boxes },
-  { key: 'customers', label: 'Customers', icon: UsersRound },
+const TABS: Array<{ key: Tab; label: string; description: string; icon: typeof TrendingUp }> = [
+  { key: 'sales', label: 'Sales', description: 'Revenue and payments', icon: TrendingUp },
+  { key: 'products', label: 'Products', description: 'Item-level sales detail', icon: ReceiptText },
+  { key: 'inventory', label: 'Inventory', description: 'Current stock position', icon: Boxes },
+  { key: 'customers', label: 'Customers', description: 'New and repeat buyers', icon: UsersRound },
 ];
 
 export default function Reports() {
+  const { brand } = useBranding();
   const [tab, setTab] = useState<Tab>('sales');
   const [preset, setPreset] = useState<Preset>('month');
   const [from, setFrom] = useState('');
@@ -174,6 +183,7 @@ export default function Reports() {
   const [productQuery, setProductQuery] = useState('');
   const [appliedProductQuery, setAppliedProductQuery] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   // `preset=custom` is a UI concept; the API takes explicit from/to instead.
   const rangeParams = useMemo(() => {
@@ -184,7 +194,8 @@ export default function Reports() {
     return `preset=${preset}`;
   }, [preset, from, to]);
 
-  const rangeReady = preset !== 'custom' || (!!from && !!to);
+  const rangeReady = preset !== 'custom' || (!!from && !!to && from <= to);
+  const reportReady = tab === 'inventory' || rangeReady;
 
   const sales = useQuery({
     queryKey: ['report-sales', rangeParams],
@@ -255,11 +266,13 @@ export default function Reports() {
     [s],
   );
 
-  const refresh = () => activeQuery.refetch();
+  const refresh = () => { if (reportReady) void activeQuery.refetch(); };
 
   /* ── Export: always the visible tab's primary table ─────────────────────── */
 
   const exportCsv = async () => {
+    if (!reportReady || !activeQuery.data || activeQuery.isFetching || activeQuery.isError) return;
+    setExportError('');
     setExporting(true);
     try {
       if (tab === 'sales') {
@@ -304,7 +317,7 @@ export default function Reports() {
         );
       }
     } catch (e: any) {
-      alert(`Export failed: ${e.message}`);
+      setExportError(`Export failed: ${e.message}`);
     } finally {
       setExporting(false);
     }
@@ -313,20 +326,20 @@ export default function Reports() {
   const rangeLabel =
     preset === 'custom'
       ? from && to
-        ? `${from} → ${to}`
+        ? `${longDay(from)} – ${longDay(to)}`
         : 'Pick both dates'
       : PRESETS.find((entry) => entry.value === preset)?.label || '';
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
+    <div className="erp-page">
       <PageHeader
         eyebrow="Insights"
-        meta={rangeLabel}
+        meta={tab === 'inventory' ? 'Current snapshot' : rangeLabel}
         title="Reports"
-        description="Revenue, product movement, stock and customer growth. Cost figures appear only when your role may read finance data."
+        description="Understand sales performance, stock availability and customer activity with reports from your business records."
         actions={
           <>
-            <button type="button" className="btn ghost" onClick={refresh} disabled={activeQuery.isFetching}>
+            <button type="button" className="btn ghost" onClick={refresh} disabled={!reportReady || activeQuery.isFetching}>
               <span className="inline-flex items-center gap-1.5">
                 <RefreshCw className={`h-3.5 w-3.5 ${activeQuery.isFetching ? 'animate-spin' : ''}`} />
                 Refresh
@@ -336,23 +349,34 @@ export default function Reports() {
               type="button"
               className="btn ghost"
               onClick={exportCsv}
-              disabled={exporting || activeQuery.isLoading || !!activeQuery.isError}
+              title={tab === 'sales' ? 'Daily sales totals for the selected period' : tab === 'products' ? 'The returned product sales lines, capped at 300' : tab === 'inventory' ? 'Current category stock quantities' : 'Customer summary metrics'}
+              disabled={exporting || !reportReady || !activeQuery.data || activeQuery.isFetching || activeQuery.isError}
             >
               <span className="inline-flex items-center gap-1.5">
                 <Download className="h-3.5 w-3.5" />
-                {exporting ? 'Exporting…' : 'Export CSV'}
+                {exporting ? 'Exporting…' : 'Export report CSV'}
               </span>
             </button>
           </>
         }
       />
 
-      {/* Range + tab controls */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm lg:flex-row lg:items-end lg:justify-between">
+      {exportError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{exportError}</p>}
+
+      <nav aria-label="Report categories" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {TABS.map((entry) => {
+          const Icon = entry.icon;
+          const active = tab === entry.key;
+          return <button key={entry.key} type="button" aria-pressed={active} onClick={() => { setTab(entry.key); setExportError(''); }} className={cn('flex min-w-0 items-start gap-3 rounded-xl border p-4 text-left transition-colors', active ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-line bg-surface text-ink-secondary hover:border-slate-400')}><Icon size={20} aria-hidden="true" className="mt-0.5 shrink-0" /><span className="min-w-0"><span className="block text-sm font-semibold">{entry.label}</span><span className="mt-1 hidden text-xs text-ink-muted sm:block">{entry.description}</span></span></button>;
+        })}
+      </nav>
+
+      <section aria-label="Report filters" className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-5 lg:flex-row lg:items-end lg:justify-between">
+        {tab === 'inventory' ? <div><h2 className="text-sm font-semibold text-ink">Current inventory snapshot</h2><p className="mt-1 text-sm text-ink-muted">Stock quantities reflect the last refresh, not a historical date range.</p></div> :
         <div className="flex flex-wrap items-end gap-2">
           <div className="w-[190px]">
-            <label className="lbl">Period</label>
-            <select value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
+            <label className="lbl" htmlFor="report-period">Reporting period</label>
+            <select id="report-period" value={preset} onChange={(e) => setPreset(e.target.value as Preset)}>
               {PRESETS.map((entry) => (
                 <option key={entry.value} value={entry.value}>
                   {entry.label}
@@ -363,54 +387,29 @@ export default function Reports() {
           {preset === 'custom' && (
             <>
               <div>
-                <label className="lbl">From</label>
-                <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                <label className="lbl" htmlFor="report-from">From</label>
+                <input id="report-from" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
               </div>
               <div>
-                <label className="lbl">To</label>
-                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                <label className="lbl" htmlFor="report-to">To</label>
+                <input id="report-to" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
               </div>
             </>
           )}
           {preset === 'custom' && !rangeReady && (
-            <span className="pb-2 text-[11px] font-medium text-amber-700">Pick both dates to run the report.</span>
+            <span role="status" className="pb-2 text-sm font-medium text-amber-800">{from && to && from > to ? 'The end date must be on or after the start date.' : 'Pick both dates to run the report.'}</span>
           )}
-        </div>
+        </div>}
+        <div className="text-xs leading-5 text-ink-muted"><p>{activeQuery.dataUpdatedAt ? `Updated ${new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: brand.timezone || 'Asia/Kolkata' }).format(activeQuery.dataUpdatedAt)}` : 'Not yet generated'}</p><p>{tab === 'products' ? 'Export includes up to 300 returned lines.' : tab === 'sales' ? 'Export includes daily totals for this period.' : tab === 'inventory' ? 'Export includes current category quantities.' : 'Export includes customer summary metrics.'}</p></div>
+      </section>
 
-        <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-slate-50/60 p-1">
-          {TABS.map((entry) => {
-            const Icon = entry.icon;
-            const active = tab === entry.key;
-            return (
-              <button
-                key={entry.key}
-                type="button"
-                onClick={() => setTab(entry.key)}
-                className={cn(
-                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
-                  active ? 'bg-brand-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-900',
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {entry.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {activeQuery.isError && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          Could not load this report. {(activeQuery.error as any)?.message || 'Check the API connection.'}
-        </div>
+      {!reportReady && (
+        <section aria-label="Report waiting for dates" className="rounded-xl border border-line bg-surface">
+          <EmptyState title="Choose a start and end date" description="Reports only run for a complete date range. Nothing is estimated while the dates are missing or reversed." />
+        </section>
       )}
 
-      {activeQuery.isLoading && (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white py-20 text-sm text-slate-500">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Building report…
-        </div>
-      )}
+      {reportReady && <DataRegion className="space-y-6" query={activeQuery} empty={!activeQuery.data} emptyTitle="No report available" emptyDescription="Try refreshing this report.">
 
       {/* ── Sales ─────────────────────────────────────────────────────────── */}
       {tab === 'sales' && s && (
@@ -434,7 +433,7 @@ export default function Reports() {
             <Kpi
               label="Items sold"
               value={s.items_sold}
-              hint="Sale lines across finalized bills"
+               hint="Quantities across finalized bills"
               icon={Boxes}
               tone="amber"
             />
@@ -448,7 +447,7 @@ export default function Reports() {
               s.gross_profit_estimate != null ? (
                 <Badge variant="success">Gross profit est. {formatInr(s.gross_profit_estimate)}</Badge>
               ) : (
-                <Badge variant="secondary">Cost hidden — needs finance.view</Badge>
+                 <Badge variant="secondary">Cost details restricted</Badge>
               )
             }
           >
@@ -480,11 +479,12 @@ export default function Reports() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+            <details className="mt-4 border-t border-line pt-4"><summary className="text-sm font-medium text-brand-700">View daily sales data</summary><div className="mt-4"><DataTable label="Daily sales totals" empty={!s.byDay?.length} headers={<><th scope="col">Date</th><th scope="col" className="text-right">Bills</th><th scope="col" className="text-right">Revenue</th></>}>{(s.byDay || []).map((row: any) => <tr key={row.d}><td>{shortDay(row.d)}</td><td className="text-right tabular-nums">{row.bills}</td><td className="text-right tabular-nums">{formatInr(row.revenue)}</td></tr>)}</DataTable></div></details>
           </ChartCard>
 
           <div className="grid gap-6 lg:grid-cols-2">
             <ChartCard title="Revenue by category" description="Where the money came from." empty={!salesByCategory.length}>
-              <div className="h-[260px] w-full">
+              <div className="h-[260px] w-full" role="img" aria-label="Revenue by category chart. Exact figures are in the Category detail table below.">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={salesByCategory} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -507,7 +507,7 @@ export default function Reports() {
             </ChartCard>
 
             <ChartCard title="Payment mix" description="How bills were settled." empty={!salesByPayment.length}>
-              <div className="h-[260px] w-full">
+              <div className="h-[260px] w-full" role="img" aria-label="Payment mix chart. Exact totals are in the payment data below.">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -530,6 +530,7 @@ export default function Reports() {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
+              <details className="mt-4 border-t border-line pt-4"><summary className="text-sm font-medium text-brand-700">View payment data</summary><div className="mt-4"><DataTable label="Payment totals" empty={!salesByPayment.length} headers={<><th scope="col">Method</th><th scope="col" className="text-right">Total</th></>}>{salesByPayment.map((row: any) => <tr key={row.method}><td>{row.method}</td><td className="text-right tabular-nums">{formatInr(row.total)}</td></tr>)}</DataTable></div></details>
             </ChartCard>
           </div>
 
@@ -540,6 +541,7 @@ export default function Reports() {
             </header>
             <div className="p-5">
               <DataTable
+                label="Sales by category"
                 empty={!salesByCategory.length}
                 headers={
                   <>
@@ -587,9 +589,10 @@ export default function Reports() {
 
           <div className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-[260px] flex-1">
-                <label className="lbl">Search lines</label>
+              <div className="min-w-0 basis-64 flex-1">
+                <label className="lbl" htmlFor="report-product-search">Search lines</label>
                 <input
+                  id="report-product-search"
                   placeholder="Product name, SKU, design code or invoice number"
                   value={productQuery}
                   onChange={(e) => setProductQuery(e.target.value)}
@@ -628,6 +631,7 @@ export default function Reports() {
             </header>
             <div className="p-5">
               <DataTable
+                label="Product sales lines"
                 empty={!(p.data || []).length}
                 headers={
                   <>
@@ -711,6 +715,7 @@ export default function Reports() {
             </header>
             <div className="p-5">
               <DataTable
+                label="Stock by category"
                 empty={!(inv.byCat || []).length}
                 headers={
                   <>
@@ -755,7 +760,7 @@ export default function Reports() {
 
           <section className="rounded-xl border border-slate-200/80 bg-white shadow-sm">
             <header className="border-b border-slate-100 p-5">
-              <h2 className="text-sm font-bold text-slate-900">Customer growth</h2>
+              <h2 className="text-base font-semibold text-ink">Customer overview</h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 New profiles in the period against the whole base. Repeat buyers are counted across all time, not just
                 the selected range.
@@ -788,6 +793,7 @@ export default function Reports() {
           </section>
         </>
       )}
+      </DataRegion>}
     </div>
   );
 }

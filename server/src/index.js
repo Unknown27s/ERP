@@ -61,13 +61,15 @@ app.use(morgan(':method :clean-url :status :res[content-length] - :response-time
 // Schema is ensured via app.ready (awaited on boot and in tests).
 app.ready = initDb();
 
-// Public preview roster for the sign-in screen. It lists the existing seeded
-// person accounts so a reviewer can pick a real login instead of a separate
-// "preview@" mailbox. Enable explicitly with PREVIEW_LOGIN=1; override the roster with
+// Public demo roster for the sign-in screen. It lists the existing seeded person
+// accounts so a reviewer can pick a real login instead of a separate "preview@"
+// mailbox. The roster is on by default, including production, and can be turned
+// off explicitly with PREVIEW_LOGIN=0. Override the roster with
 // PREVIEW_EMAILS=a@x,b@y and the passwords with PREVIEW_PASSWORDS=a@x:pass,...
 //
-// Preview mode intentionally exposes these demo credentials over the public
-// /api/config endpoint. Never enable it on a deployment with real staff credentials.
+// Only the fixed demo mailbox allowlist is exposed, and each password is checked
+// against the stored bcrypt hash before it is returned. Accounts whose password
+// has been changed, disabled accounts, and every other staff account stay hidden.
 const PREVIEW_EMAILS = [
   'admin@marvelsoftware.local',
   'manager@marvelsoftware.local',
@@ -100,7 +102,8 @@ function previewPasswords() {
 }
 
 async function loadPreviewAccounts(shopId) {
-  if (process.env.PREVIEW_LOGIN !== '1' || !shopId) return [];
+  // Explicit opt-out for deployments that must not publish demo credentials.
+  if (process.env.PREVIEW_LOGIN === '0' || !shopId) return [];
   const emails = (process.env.PREVIEW_EMAILS || PREVIEW_EMAILS.join(','))
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -141,7 +144,7 @@ async function loadPreviewAccounts(shopId) {
 // so a rename in Settings is reflected immediately.
 app.get('/api/config', async (req, res, next) => {
   try {
-    if (process.env.PREVIEW_LOGIN === '1') res.set('Cache-Control', 'no-store');
+    if (process.env.PREVIEW_LOGIN !== '0') res.set('Cache-Control', 'no-store');
     const shop = await get('SELECT id FROM shops WHERE name = ? ORDER BY id LIMIT 1',
       process.env.COMPANY_NAME || 'MarvelSoftware') || await get('SELECT id FROM shops ORDER BY id LIMIT 1');
     const accounts = await loadPreviewAccounts(shop?.id);
@@ -175,6 +178,7 @@ app.use('/api/admin', require('./routes/occasions'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/hr', require('./routes/hr'));
 app.use('/api/employee', require('./routes/employee'));
+app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api', require('./routes/dashboard'));
 app.use('/api', require('./routes/generic-commerce'));
 app.use('/api', require('./routes/catalog'));

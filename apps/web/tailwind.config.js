@@ -8,6 +8,14 @@ export default {
   theme: {
     extend: {
       colors: {
+        canvas: 'rgb(var(--erp-canvas) / <alpha-value>)',
+        surface: 'rgb(var(--erp-surface) / <alpha-value>)',
+        line: 'rgb(var(--erp-border) / <alpha-value>)',
+        ink: {
+          DEFAULT: 'rgb(var(--erp-text) / <alpha-value>)',
+          secondary: 'rgb(var(--erp-secondary) / <alpha-value>)',
+          muted: 'rgb(var(--erp-muted) / <alpha-value>)',
+        },
         brand: {
           50: '#eff6ff',
           100: '#dbeafe',
@@ -15,8 +23,8 @@ export default {
           300: '#93c5fd',
           400: '#60a5fa',
           500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
+          600: 'rgb(var(--erp-primary) / <alpha-value>)',
+          700: 'rgb(var(--erp-primary-hover) / <alpha-value>)',
           800: '#1e40af',
           900: '#1e3a8a',
           950: '#172554',

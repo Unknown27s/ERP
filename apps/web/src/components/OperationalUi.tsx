@@ -1,24 +1,36 @@
-import { cloneElement, useId, useState, type ReactElement, type ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, useId, useState, type ReactElement, type ReactNode } from 'react';
 import PageHeader from './PageHeader';
-export function ModulePage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
-  return <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-8"><PageHeader eyebrow="Business operations" title={title} description={description} />{children}</div>;
+import { DataRegion, ErrorState, LoadingState, type QueryStatus } from './feedback/DataState';
+export function ModulePage({ title, description, actions, children }: { title: string; description: string; actions?: ReactNode; children: ReactNode }) {
+  return <div className="erp-page"><PageHeader eyebrow="Business operations" title={title} description={description} actions={actions} />{children}</div>;
 }
 export function Panel({ title, children }: { title: string; children: ReactNode }) {
-  return <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="mb-4 text-sm font-bold text-slate-900">{title}</h2>{children}</section>;
+  const id = useId();
+  return <section aria-labelledby={id} className="erp-panel"><h2 id={id} className="mb-4 text-base font-semibold text-ink">{title}</h2>{children}</section>;
 }
-export function QueryState({ query }: { query: { isLoading: boolean; isError: boolean; error: unknown } }) {
-  if (query.isLoading) return <p role="status" className="p-4 text-sm text-slate-500">Loading…</p>;
-  if (query.isError) return <p role="alert" className="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">{(query.error as Error)?.message || 'Unable to load records'}</p>;
+export function QueryState({ query }: { query: QueryStatus }) {
+  if (query.isLoading) return <LoadingState />;
+  if (query.isError) return <ErrorState query={query} stale={query.data != null} />;
   return null;
 }
-export function Field({ label, children }: { label: string; children: ReactElement<{ id?: string }> }) {
+export function Field({ label, hint, error, required, children }: { label: string; hint?: string; error?: string; required?: boolean; children: ReactElement<{ id?: string; required?: boolean; 'aria-describedby'?: string; 'aria-invalid'?: boolean }> }) {
   const generatedId = useId();
   const id = children.props.id || generatedId;
-  return <div className="min-w-0 space-y-1 text-xs font-semibold text-slate-600"><label htmlFor={id} className="block">{label}</label>{cloneElement(children, { id })}</div>;
+  const describedBy = [children.props['aria-describedby'], (hint || error) && `${id}-help`].filter(Boolean).join(' ') || undefined;
+  return <div className="min-w-0 space-y-1.5 text-sm"><div className="flex items-center gap-1"><label htmlFor={id} className="block font-medium text-ink-secondary">{label}</label>{(required || children.props.required) && <span aria-hidden="true" className="text-rose-700">*</span>}</div>{cloneElement(children, { id, required: required ?? children.props.required, 'aria-describedby': describedBy, 'aria-invalid': error ? true : children.props['aria-invalid'] })}{(hint || error) && <p id={`${id}-help`} className={`text-xs ${error ? 'text-rose-700' : 'text-ink-muted'}`}>{error || hint}</p>}</div>;
 }
-export function Register({ headers, children, empty }: { headers: string[]; children: ReactNode; empty: boolean }) {
-  if (empty) return <p className="py-8 text-center text-sm text-slate-500">No records yet.</p>;
-  return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs text-slate-500">{headers.map((header) => <th key={header} className="px-3 py-3">{header}</th>)}</tr></thead><tbody className="divide-y divide-slate-100 [&_td]:px-3 [&_td]:py-3">{children}</tbody></table></div>;
+export function Register({ headers, children, empty, query, label = 'Records', numericColumns = [], emptyTitle, emptyDescription, emptyAction }: {
+  headers: string[]; children: ReactNode; empty: boolean; query?: QueryStatus; label?: string; numericColumns?: number[]; emptyTitle?: string; emptyDescription?: string; emptyAction?: ReactNode;
+}) {
+  const rows = Children.map(children, (row) => {
+    if (!isValidElement<{ children?: ReactNode }>(row)) return row;
+    return cloneElement(row, {}, Children.map(row.props.children, (cell, index) => {
+      if (!isValidElement<{ 'data-numeric'?: boolean }>(cell)) return cell;
+      return cloneElement(cell, { 'data-numeric': numericColumns.includes(index) || undefined });
+    }));
+  });
+  const table = <div role="region" aria-label={`${label} table`} tabIndex={0} className="overflow-x-auto rounded-lg border border-line"><table className="erp-register"><caption className="sr-only">{label}</caption><thead><tr>{headers.map((header, index) => <th scope="col" key={header} data-numeric={numericColumns.includes(index) || undefined}>{header}</th>)}</tr></thead><tbody>{rows}</tbody></table></div>;
+  return <DataRegion query={query || { isLoading: false, isError: false, error: null }} empty={empty} emptyTitle={emptyTitle} emptyDescription={emptyDescription} emptyAction={emptyAction}>{table}</DataRegion>;
 }
 export function useOperation() {
   const [busy, setBusy] = useState(false);
@@ -31,5 +43,6 @@ export function useOperation() {
     finally { setBusy(false); }
   }
   const notice = <>{error && <p role="alert" className="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}{message && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-700">{message}</p>}</>;
-  return { busy, run, notice };
+  const clear = () => { setMessage(''); setError(''); };
+  return { busy, run, notice, clear };
 }

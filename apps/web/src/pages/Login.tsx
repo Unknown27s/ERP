@@ -7,7 +7,7 @@
  *   - Left: Deep enterprise brand showcase (#0B0F19) with subtle radial glows,
  *     logo badge, product title, and architectural feature badges.
  *   - Right: Centered, clean form card with accessible inputs, interactive
- *     password reveal, and a preview roster that fills a real person's login.
+ *     password reveal, and a demo roster that fills a real person's login.
  * - Mobile: Stacks gracefully into a compact brand header followed by the form.
  *
  * Design Tokens:
@@ -32,16 +32,11 @@ import {
   EyeOff,
   ArrowRight,
   Sparkles,
+  Search,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-
-const DEMO_ACCOUNTS: PreviewAccount[] = [
-  { name: 'Admin', role: 'Full access', email: 'admin@marvelsoftware.local', password: 'Admin@123' },
-  { name: 'HR', role: 'People & Leave', email: 'hr@marvelsoftware.local', password: 'Hr@12345' },
-  { name: 'Finance', role: 'Books & Payroll', email: 'finance@marvelsoftware.local', password: 'Finance@123' },
-  { name: 'Employee', role: 'Self-service', email: 'employee@marvelsoftware.local', password: 'Employee@123' },
-];
 
 export default function Login() {
   const { login } = useAuth();
@@ -53,13 +48,15 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [rosterSearch, setRosterSearch] = useState('');
   const passwordRef = useRef<HTMLInputElement>(null);
 
   // Runtime branding resolved from server (/api/config)
   const productName = brand.product_name || brand.company_name || 'MarvelSoftware';
   const companyName = brand.company_name || 'MarvelSoftware Inc.';
-  // Runtime preview accounts override the seeded defaults in every build mode.
-  const previewAccounts = brand.preview?.enabled && brand.preview.accounts.length ? brand.preview.accounts : DEMO_ACCOUNTS;
+  // Server-configured demo roster. There is no client-side fallback credential list.
+  const previewAccounts = brand.preview?.enabled ? brand.preview.accounts : [];
+  const visibleAccounts = previewAccounts.filter((account) => `${account.name} ${account.email} ${account.role}`.toLowerCase().includes(rosterSearch.trim().toLowerCase()));
 
   /* ── 1. Form Submission Handler ─────────────────────────────────────────── */
   const handleSubmit = async (e: React.FormEvent) => {
@@ -71,7 +68,7 @@ export default function Login() {
     try {
       await login(email, password);
       const me = await import('../lib/api').then(({ api }) => api.get('/auth/me'));
-      navigate(me.user.role_name === 'Employee' ? '/employee' : '/admin', { replace: true });
+      navigate(me.user.role_name === 'Employee' ? '/employee/tasks' : '/admin', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Invalid credentials. Please verify your email and password.');
     } finally {
@@ -97,7 +94,7 @@ export default function Login() {
       {/* ──────────────────────────────────────────────────────────────────
           LEFT PANE: Brand Identity & Feature Value Proposition
           ────────────────────────────────────────────────────────────────── */}
-      <div className="relative md:w-5/12 lg:w-1/2 bg-[#0B0F19] text-white p-8 md:p-14 flex flex-col justify-between overflow-hidden">
+      <div className="relative md:w-5/12 lg:w-1/2 bg-[#0B0F19] text-white p-6 md:p-12 flex flex-col justify-between overflow-hidden">
         {/* Ambient atmospheric glows */}
         <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 rounded-full bg-brand-600/20 blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-80 h-80 rounded-full bg-indigo-600/15 blur-3xl pointer-events-none" />
@@ -105,8 +102,8 @@ export default function Login() {
         {/* Brand Header & Value Stack */}
         <div className="relative z-10">
           {/* Logo & Product Monogram */}
-          <div className="flex items-center gap-4 mb-8">
-            <div className="w-44 h-20 sm:w-56 sm:h-24 rounded-2xl bg-white px-3 py-2 shadow-lg shadow-black/20 flex items-center justify-center shrink-0">
+          <div className="flex items-center gap-4 md:mb-8">
+            <div className="w-24 h-12 rounded-xl bg-white px-3 py-2 flex items-center justify-center shrink-0">
               <img src="/logo.avif" alt="Logo" className="w-full h-full object-contain" />
             </div>
             <div>
@@ -116,7 +113,7 @@ export default function Login() {
           </div>
 
           {/* Headline & Value Narrative */}
-          <div className="space-y-4 max-w-lg mt-12">
+          <div className="hidden space-y-4 max-w-lg mt-12 md:block">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs font-medium">
               <Sparkles className="w-3.5 h-3.5" />
               <span>Integrated Business Platform</span>
@@ -130,7 +127,7 @@ export default function Login() {
           </div>
 
           {/* Core Capability Highlights */}
-          <div className="mt-10 grid gap-4 max-w-md">
+          <div className="mt-10 hidden gap-4 max-w-md md:grid">
             <div className="flex items-start gap-3.5 p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
               <div className="p-2 rounded-lg bg-brand-500/10 text-brand-400 shrink-0">
                 <ShieldCheck className="w-4 h-4" />
@@ -164,7 +161,7 @@ export default function Login() {
         </div>
 
         {/* Left Footer: Company Info & Connectivity Status */}
-        <div className="relative z-10 pt-8 mt-12 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+        <div className="relative z-10 pt-8 mt-12 border-t border-slate-800/80 hidden items-center justify-between text-xs text-slate-400 md:flex">
           <span>{companyName}</span>
           <span className="flex items-center gap-1.5 text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Secure sign-in
@@ -264,22 +261,26 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Demo role selection is intentionally available in production too. */}
-          <div className="pt-6 border-t border-slate-200">
+          {previewAccounts.length > 0 && <section aria-labelledby="preview-people-heading" className="pt-6 border-t border-slate-200">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-medium text-slate-500">Explore with a demo account</span>
-                <span className="text-[11px] font-semibold text-brand-600">Click to fill</span>
+                <h3 id="preview-people-heading" className="text-sm font-semibold text-slate-900">Choose a demo person</h3>
+                <span className="text-xs font-medium text-brand-700">{previewAccounts.length} people</span>
               </div>
               <p className="text-[11px] text-slate-500 mb-3">
                 Choose an account to fill the sign-in form. Server authentication and role permissions still apply.
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                {previewAccounts.map((a) => (
+              <label htmlFor="preview-people-search" className="sr-only">Search demo people</label>
+              <Input id="preview-people-search" value={rosterSearch} onChange={(event) => setRosterSearch(event.target.value)} placeholder="Find a person or role…" icon={<Search className="h-4 w-4" />} />
+              <div className="mt-3 grid max-h-[30rem] grid-cols-1 gap-2 overflow-y-auto p-1 sm:grid-cols-2">
+                {visibleAccounts.map((a) => (
                   <button
                     key={a.email}
-                    type="button"
+                     type="button"
+                     aria-label={`${a.name} ${a.role}`}
+                     aria-pressed={email === a.email}
+                     disabled={loading}
                     onClick={() => fillPreview(a)}
-                    title={`${a.name} — ${a.email}`}
+                    title={`Sign in as ${a.name} — ${a.role}`}
                     className={`text-left p-2.5 rounded-lg border text-xs transition-all ${
                       email === a.email
                         ? 'border-brand-500 bg-brand-50/60 ring-1 ring-brand-500'
@@ -287,12 +288,18 @@ export default function Login() {
                     }`}
                   >
                     <div className="font-semibold text-slate-800 truncate">{a.name}</div>
-                    <div className="text-[10px] text-slate-500 truncate">{a.role}</div>
+                    <div className="mt-1 text-xs font-medium text-brand-700 truncate">{a.role}</div>
+                    <div className="mt-1 break-all text-[11px] text-slate-500">{a.email}</div>
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-600">
+                      <KeyRound className="h-3 w-3 shrink-0 text-slate-400" aria-hidden="true" />
+                      <code className="break-all font-mono">{a.password}</code>
+                    </div>
                   </button>
                 ))}
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-slate-500">Shared demo accounts. Use sample data only; do not enter personal or confidential information.</p>
-          </div>
+              {!visibleAccounts.length && <p role="status" className="py-4 text-sm text-slate-500">No matching demo people.</p>}
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">Sample accounts for evaluation. Replace these default passwords before storing real business data.</p>
+          </section>}
         </div>
       </div>
     </div>

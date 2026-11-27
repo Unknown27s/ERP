@@ -119,16 +119,15 @@ Seeded by `npm run seed` (change every password before production):
 
 Rename the company and product in **Company settings**. The login screen and sidebar read `GET /api/config`, so the new name appears immediately.
 
-### Preview sign-in roster
+### Demo sign-in roster
 
-The login screen lists the seeded staff accounts so a reviewer can click a card and have that person's work email **and preview password** filled in for one-click sign-in. This uses the existing person logins — no separate preview mailbox or shared demo password is created.
+The login screen lists the seeded staff accounts, with their role and password, so a reviewer can click a card and have that person's work email and password filled in for one-click sign-in. This uses the existing person logins — no separate preview mailbox or shared demo password is created.
 
-- Off by default. Set `PREVIEW_LOGIN=1` only on an isolated demo deployment; never expose it with real staff credentials.
+- **On by default, including production builds.** The roster is limited to the seven seeded demo mailboxes above and every password is checked against the stored bcrypt hash before it is returned. Accounts whose password has been changed are omitted.
+- Set `PREVIEW_LOGIN=0` to remove the roster from `/api/config` entirely. Do this before a deployment holds real business data or real staff accounts.
 - `PREVIEW_EMAILS=a@x,b@y` overrides which accounts appear; by default the roster is the seven seeded logins above.
-- `PREVIEW_PASSWORDS=a@x:pass,b@y:pass` overrides the preview passwords (defaults follow the seed credentials).
-- `GET /api/config` returns `{ name, email, role, password }` for the roster while preview is enabled. Treat that endpoint as demo-only and disable it before real staff use.
-- In demo mode, the admin sidebar also has a collapsed **Demo sign-in accounts** menu. Choose a role to see its email and reveal its preview password. This menu is absent unless `PREVIEW_LOGIN=1`.
-- Accounts whose passwords have been changed are omitted rather than showing an invalid seeded password.
+- `PREVIEW_PASSWORDS=a@x:pass,b@y:pass` overrides the demo passwords (defaults follow the seed credentials).
+- `GET /api/config` returns `{ name, email, role, password }` for the roster. Because those credentials are public, treat any deployment with the roster enabled as a demo environment.
 
 
 ---

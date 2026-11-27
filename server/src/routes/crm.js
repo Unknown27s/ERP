@@ -4,6 +4,7 @@ const { auth, requirePermission, audit } = require('../middleware/auth');
 const { hasPermission } = require('../services/rbac');
 const { normalizePhone, isValidPhone } = require('../services/phone');
 const campaignSvc = require('../services/campaigns');
+const { reportRange } = require('../services/report-range');
 
 const router = express.Router();
 router.use(auth);
@@ -267,50 +268,40 @@ router.post('/webhooks/messaging-provider', async (req, res) => {
 });
 
 // ---- Reports (§10 — single definitions, SQL-aggregated) ----
-function range(req) {
-  const { preset, from, to } = req.query;
-  const now = new Date();
-  let s, e = now.toISOString();
-  const days = { today: 1, week: 7, month: 30, '3m': 90, '6m': 180, '1y': 365 }[preset];
-  if (from && to) { s = from; e = to; }
-  else if (days) { s = new Date(now.getTime() - days * 864e5).toISOString(); }
-  else { s = new Date(now.getTime() - 30 * 864e5).toISOString(); }
-  return { s, e };
-}
 router.get('/reports/sales', requirePermission('reports.view'), async (req, res) => {
-  const { s, e } = range(req);
-  const rows = await all(`SELECT * FROM sales WHERE shop_id=? AND sold_at>=? AND sold_at<=? AND status='finalized'`, req.user.shop_id, s, e);
+  const { s, e, timezone } = await reportRange(req);
+  const rows = await all(`SELECT * FROM sales WHERE shop_id=? AND sold_at>=? AND sold_at<? AND status='finalized'`, req.user.shop_id, s, e);
   const revenue = rows.reduce((a, r) => a + r.total_inr, 0);
   const bills = rows.length;
   const custIds = new Set(rows.map(r => r.customer_id).filter(Boolean));
   const items = await get(`SELECT COALESCE(SUM(si.quantity),0) n, COALESCE(SUM(si.net_gold_weight_g),0) w FROM sale_items si JOIN sales s ON s.id=si.sale_id
-    WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized'`, req.user.shop_id, s, e);
-  const byDay = await all(`SELECT ${dayExpr('sold_at')} d, COUNT(*) bills, SUM(total_inr) revenue FROM sales
-    WHERE shop_id=? AND sold_at>=? AND sold_at<=? AND status='finalized' GROUP BY d ORDER BY d`, req.user.shop_id, s, e);
+    WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<? AND s.status='finalized'`, req.user.shop_id, s, e);
+  const byDay = await all(`SELECT to_char(sold_at AT TIME ZONE ?, 'YYYY-MM-DD') d, COUNT(*) bills, SUM(total_inr) revenue FROM sales
+    WHERE shop_id=? AND sold_at>=? AND sold_at<? AND status='finalized' GROUP BY d ORDER BY d`, timezone, req.user.shop_id, s, e);
   const byCat = await all(`SELECT c.name category, SUM(si.quantity) pieces, SUM(si.line_total_inr) revenue FROM sale_items si
     JOIN sales s ON s.id=si.sale_id JOIN products p ON p.id=si.product_id LEFT JOIN categories c ON c.id=p.category_id
-    WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized' GROUP BY c.name`, req.user.shop_id, s, e);
+    WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<? AND s.status='finalized' GROUP BY c.name`, req.user.shop_id, s, e);
   const byPay = await all(`SELECT py.method, SUM(py.amount_inr) total FROM payments py JOIN sales s ON s.id=py.sale_id
-    WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized' GROUP BY py.method`, req.user.shop_id, s, e);
+    WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<? AND s.status='finalized' GROUP BY py.method`, req.user.shop_id, s, e);
   let cogs = 0;
   // Cost and margin are finance data, not general report data. A Sales/Store
   // user may hold reports.view without finance.view.
   const canSeeCost = hasPermission(req.user.permissions, 'finance.view');
   if (canSeeCost) {
     cogs = (await get(`SELECT COALESCE(SUM(COALESCE(si.unit_cost_inr,p.acquisition_cost_inr) * si.quantity),0) c FROM sale_items si JOIN sales s ON s.id=si.sale_id
-      JOIN products p ON p.id=si.product_id WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<=? AND s.status='finalized'`, req.user.shop_id, s, e)).c;
+      JOIN products p ON p.id=si.product_id WHERE s.shop_id=? AND s.sold_at>=? AND s.sold_at<? AND s.status='finalized'`, req.user.shop_id, s, e)).c;
   }
   res.json({ data: {
-    from: s, to: e, revenue, bill_count: bills, unique_customers: custIds.size,
+    from: s, to: e, end_exclusive: true, timezone, revenue, bill_count: bills, unique_customers: custIds.size,
     avg_bill: bills ? revenue / bills : 0, items_sold: items.n, gold_weight_g: items.w,
     gross_profit_estimate: canSeeCost ? revenue - cogs : null,
     byDay, byCat, byPay,
   } });
 });
 router.get('/reports/category-products', requirePermission('reports.view'), async (req, res) => {
-  const { s, e } = range(req);
+  const { s, e, timezone } = await reportRange(req);
   const { category, q } = req.query;
-  const conds = [`s.shop_id=?`, `s.sold_at>=?`, `s.sold_at<=?`, `s.status='finalized'`];
+  const conds = [`s.shop_id=?`, `s.sold_at>=?`, `s.sold_at<?`, `s.status='finalized'`];
   const args = [req.user.shop_id, s, e];
   if (category) { conds.push(`COALESCE(c.name,'—')=?`); args.push(category); }
   if (q) {
@@ -343,7 +334,7 @@ router.get('/reports/category-products', requirePermission('reports.view'), asyn
   if (!hasPermission(req.user.permissions, 'finance.view')) {
     for (const row of rows) delete row.acquisition_cost_inr;
   }
-  res.json({ data: rows, summary, category: category || null, from: s, to: e });
+  res.json({ data: rows, summary, category: category || null, from: s, to: e, end_exclusive: true, timezone });
 });
 router.get('/reports/inventory', requirePermission('reports.view'), async (req, res) => {
   const byCat = await all(`SELECT c.name category, SUM(p.stock_on_hand - p.stock_reserved) pieces, 0 AS weight_g, SUM(p.acquisition_cost_inr * (p.stock_on_hand - p.stock_reserved)) acq_inr
@@ -356,11 +347,11 @@ router.get('/reports/inventory', requirePermission('reports.view'), async (req, 
   res.json({ data: { byCat, low_stock: low } });
 });
 router.get('/reports/customers', requirePermission('reports.view'), async (req, res) => {
-  const { s, e } = range(req);
-  const created = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=? AND created_at>=? AND created_at<=?`, req.user.shop_id, s, e)).n;
+  const { s, e, timezone } = await reportRange(req);
+  const created = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=? AND created_at>=? AND created_at<?`, req.user.shop_id, s, e)).n;
   const repeat = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=? AND purchase_count > 1`, req.user.shop_id)).n;
   const total = (await get(`SELECT COUNT(*) n FROM customers WHERE shop_id=?`, req.user.shop_id)).n;
-  res.json({ data: { new_customers: created, repeat_customers: repeat, total, repeat_rate: total ? repeat / total : 0 } });
+  res.json({ data: { new_customers: created, repeat_customers: repeat, total, repeat_rate: total ? repeat / total : 0, from: s, to: e, end_exclusive: true, timezone } });
 });
 // Distinct actions, for the audit filter dropdown. Counted per shop so the
 // list never exposes action names that only occur in another company's trail.

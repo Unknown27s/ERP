@@ -14,7 +14,7 @@ export type Branding = {
   company_name: string;
   timezone?: string;
   currency?: string;
-  /** Demo-only roster; may include passwords only when PREVIEW_LOGIN=1. */
+  /** Demo roster returned by the server; includes passwords unless PREVIEW_LOGIN=0. */
   preview?: { enabled: boolean; accounts: PreviewAccount[] };
 };
 
